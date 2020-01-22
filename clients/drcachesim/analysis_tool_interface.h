@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2017 Google, Inc.  All rights reserved.
+ * Copyright (c) 2017-2020 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -47,5 +47,11 @@
  */
 analysis_tool_t *
 drmemtrace_analysis_tool_create();
+
+/* Returns the path to the module file, either as passed in or deduced from the trace file
+ * path.
+ */
+std::string
+drmemtrace_get_module_file_path();
 
 #endif /* _ANALYSIS_TOOL_INTERFACE_H_ */

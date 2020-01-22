@@ -38,28 +38,45 @@
 
 #include "../analysis_tool.h"
 #include "../common/memref.h"
+#include "raw2trace.h"
+#include "raw2trace_directory.h"
+#include <unordered_map>
 #include <unordered_map>
 
 class trace_invariants_t : public analysis_tool_t {
 public:
-    trace_invariants_t(bool offline = true, unsigned int verbose = 0);
+    trace_invariants_t(const std::string &module_file_path, bool offline = true,
+                       unsigned int verbose = 0);
     virtual ~trace_invariants_t();
+    std::string
+    initialize() override;
     bool
     process_memref(const memref_t &memref) override;
     bool
     print_results() override;
 
 protected:
-    bool knob_offline;
-    unsigned int knob_verbose;
-    memref_t prev_instr;
-    memref_t prev_xfer_marker;
-    memref_t prev_entry;
-    memref_t prev_prev_entry;
-    memref_t pre_signal_instr;
-    int instrs_until_interrupt;
-    int memrefs_until_interrupt;
-    addr_t app_handler_pc;
+    std::string
+    get_opcode(addr_t pc, int *opcode OUT);
+
+    void *dcontext = nullptr;
+    std::string module_file;
+    std::unique_ptr<module_mapper_t> module_mapper;
+    std::unordered_map<app_pc, int> opcode_cache;
+    app_pc last_trace_module_start = nullptr;
+    size_t last_trace_module_size = 0;
+    app_pc last_mapped_module_start = nullptr;
+    raw2trace_directory_t directory;
+    bool knob_offline = false;
+    unsigned int knob_verbose = 0;
+    memref_t prev_instr = {};
+    memref_t prev_xfer_marker = {};
+    memref_t prev_entry = {};
+    memref_t prev_prev_entry = {};
+    memref_t pre_signal_instr = {};
+    int instrs_until_interrupt = -1;
+    int memrefs_until_interrupt = -1;
+    addr_t app_handler_pc = 0;
     std::unordered_map<memref_tid_t, bool> thread_exited;
 };
 

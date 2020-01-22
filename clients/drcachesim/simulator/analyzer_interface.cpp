@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2017-2018 Google, Inc.  All rights reserved.
+ * Copyright (c) 2017-2020 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -55,8 +55,8 @@
  * If a trace file is provided instead of a trace directory, it searches in the
  * directory which contains the trace file.
  */
-static std::string
-get_module_file_path()
+std::string
+drmemtrace_get_module_file_path()
 {
     std::string module_file_path;
     if (!op_module_file.get_value().empty())
@@ -165,12 +165,12 @@ drmemtrace_analysis_tool_create()
     } else if (op_simulator_type.get_value() == BASIC_COUNTS) {
         return basic_counts_tool_create(op_verbose.get_value());
     } else if (op_simulator_type.get_value() == OPCODE_MIX) {
-        std::string module_file_path = get_module_file_path();
+        std::string module_file_path = drmemtrace_get_module_file_path();
         if (module_file_path.empty())
             return nullptr;
         return opcode_mix_tool_create(module_file_path, op_verbose.get_value());
     } else if (op_simulator_type.get_value() == VIEW) {
-        std::string module_file_path = get_module_file_path();
+        std::string module_file_path = drmemtrace_get_module_file_path();
         if (module_file_path.empty())
             return nullptr;
         return view_tool_create(module_file_path, op_skip_refs.get_value(),

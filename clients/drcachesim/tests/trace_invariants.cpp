@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2017-2019 Google, Inc.  All rights reserved.
+ * Copyright (c) 2017-2020 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -35,22 +35,81 @@
 #include <iostream>
 #include <string.h>
 
-trace_invariants_t::trace_invariants_t(bool offline, unsigned int verbose)
-    : knob_offline(offline)
+trace_invariants_t::trace_invariants_t(const std::string &module_file_path, bool offline,
+                                       unsigned int verbose)
+    : module_file(module_file_path)
+    , knob_offline(offline)
     , knob_verbose(verbose)
-    , instrs_until_interrupt(-1)
-    , memrefs_until_interrupt(-1)
-    , app_handler_pc(0)
 {
-    memset(&prev_instr, 0, sizeof(prev_instr));
-    memset(&pre_signal_instr, 0, sizeof(pre_signal_instr));
-    memset(&prev_xfer_marker, 0, sizeof(prev_xfer_marker));
-    memset(&prev_entry, 0, sizeof(prev_entry));
-    memset(&prev_prev_entry, 0, sizeof(prev_prev_entry));
 }
 
 trace_invariants_t::~trace_invariants_t()
 {
+}
+
+std::string
+trace_invariants_t::initialize()
+{
+    if (!knob_offline)
+        return "";
+    if (module_file.empty())
+        return "Module file path is missing";
+    dcontext = dr_standalone_init();
+    std::string error = directory.initialize_module_file(module_file);
+    if (!error.empty())
+        return "Failed to initialize directory: " + error;
+    module_mapper = module_mapper_t::create(directory.modfile_bytes, nullptr, nullptr,
+                                            nullptr, nullptr, knob_verbose);
+    module_mapper->get_loaded_modules();
+    error = module_mapper->get_last_error();
+    if (!error.empty())
+        return "Failed to load binaries: " + error;
+    return "";
+}
+
+std::string
+trace_invariants_t::get_opcode(addr_t pc, int *opcode_res OUT)
+{
+    if (!knob_offline) {
+        // No support for opcodes for online.
+        *opcode_res = OP_UNDECODED;
+        return "";
+    }
+    app_pc mapped_pc;
+    const app_pc trace_pc = reinterpret_cast<app_pc>(pc);
+    if (trace_pc >= last_trace_module_start &&
+        static_cast<size_t>(trace_pc - last_trace_module_start) <
+            last_trace_module_size) {
+        mapped_pc = last_mapped_module_start + (trace_pc - last_trace_module_start);
+    } else {
+        mapped_pc = module_mapper->find_mapped_trace_bounds(
+            trace_pc, &last_mapped_module_start, &last_trace_module_size);
+        if (!module_mapper->get_last_error().empty()) {
+            last_trace_module_start = nullptr;
+            last_trace_module_size = 0;
+            return "Failed to find mapped address for " + to_hex_string(pc) + ": " +
+                module_mapper->get_last_error();
+        }
+        last_trace_module_start = trace_pc - (mapped_pc - last_mapped_module_start);
+    }
+    int opcode;
+    auto cached_opcode = opcode_cache.find(mapped_pc);
+    if (cached_opcode != opcode_cache.end()) {
+        opcode = cached_opcode->second;
+    } else {
+        instr_t instr;
+        instr_init(dcontext, &instr);
+        app_pc next_pc = decode(dcontext, mapped_pc, &instr);
+        if (next_pc == NULL || !instr_valid(&instr)) {
+            instr_free(dcontext, &instr);
+            return "Failed to decode instruction " + to_hex_string(pc);
+        }
+        opcode = instr_get_opcode(&instr);
+        opcode_cache[mapped_pc] = opcode;
+        instr_free(dcontext, &instr);
+    }
+    *opcode_res = opcode;
+    return "";
 }
 
 bool
@@ -99,6 +158,16 @@ trace_invariants_t::process_memref(const memref_t &memref)
         assert(instrs_until_interrupt != 0);
         if (instrs_until_interrupt > 0)
             --instrs_until_interrupt;
+#ifdef X86
+        int opcode;
+        error_string = get_opcode(memref.instr.addr, &opcode);
+        if (!error_string.empty())
+            return false;
+        if (opcode == OP_ud2a) {
+            assert(instrs_until_interrupt == -1);
+            instrs_until_interrupt = 0;
+        }
+#endif
         // Invariant: offline traces guarantee that a branch target must immediately
         // follow the branch w/ no intervening trace switch.
         if (knob_offline && type_is_instr_branch(prev_instr.instr.type)) {

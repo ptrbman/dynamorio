@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2017-2019 Google, Inc.  All rights reserved.
+ * Copyright (c) 2017-2020 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -165,6 +165,7 @@ opcode_mix_t::parallel_shard_memref(void *shard_data, const memref_t &memref)
         instr_init(dcontext, &instr);
         app_pc next_pc = decode(dcontext, mapped_pc, &instr);
         if (next_pc == NULL || !instr_valid(&instr)) {
+            instr_free(dcontext, &instr);
             error_string =
                 "Failed to decode instruction " + to_hex_string(memref.instr.addr);
             return false;

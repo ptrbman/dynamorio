@@ -1,5 +1,5 @@
 # **********************************************************
-# Copyright (c) 2015-2019 Google, Inc.    All rights reserved.
+# Copyright (c) 2015-2020 Google, Inc.    All rights reserved.
 # **********************************************************
 
 # Redistribution and use in source and binary forms, with or without
@@ -211,10 +211,13 @@ add_executable(histogram_launcher
   tools/histogram_launcher.cpp
   tests/trace_invariants.cpp
   )
+# We hit dup symbol errors on Windows so we need libc earlier before DR:
+_DR_get_static_libc_list(static_libc)
 target_link_libraries(histogram_launcher drmemtrace_analyzer drmemtrace_histogram
-  drfrontendlib)
+  drmemtrace_raw2trace drcovlib_static drfrontendlib ${static_libc})
 use_DynamoRIO_extension(histogram_launcher droption)
 add_dependencies(histogram_launcher api_headers)
+configure_DynamoRIO_static(histogram_launcher)
 # We have a companion test built using a separate --build-and-test CMake project in
 # tests/analyzer_separate.cpp to better test 3rd-party usage.
 set_property(GLOBAL PROPERTY DynamoRIO_drmemtrace_src_dir

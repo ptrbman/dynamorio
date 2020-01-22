@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2016-2018 Google, Inc.  All rights reserved.
+ * Copyright (c) 2016-2020 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -100,7 +100,13 @@ _tmain(int argc, const TCHAR *targv[])
         op_line_size.get_value(), op_report_top.get_value(), op_verbose.get_value());
     std::vector<analysis_tool_t *> tools;
     tools.push_back(tool1);
-    trace_invariants_t tool2(true /*offline*/, op_verbose.get_value());
+    std::string module_file_path =
+        op_trace_dir.get_value() + std::string(DIRSEP) + DRMEMTRACE_MODULE_LIST_FILENAME;
+    if (!std::ifstream(module_file_path.c_str()).good()) {
+        module_file_path = op_trace_dir.get_value() + std::string(DIRSEP) +
+            OUTFILE_SUBDIR + std::string(DIRSEP) + DRMEMTRACE_MODULE_LIST_FILENAME;
+    }
+    trace_invariants_t tool2(module_file_path, true /*offline*/, op_verbose.get_value());
     if (op_test_mode.get_value()) {
         // We use this launcher to run tests as well:
         tools.push_back(&tool2);

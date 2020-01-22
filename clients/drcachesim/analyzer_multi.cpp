@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2016-2019 Google, Inc.  All rights reserved.
+ * Copyright (c) 2016-2020 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -170,7 +170,9 @@ analyzer_multi_t::create_analysis_tools()
     num_tools = 1;
 #ifdef DEBUG
     if (op_test_mode.get_value()) {
-        tools[1] = new trace_invariants_t(op_offline.get_value(), op_verbose.get_value());
+        tools[1] = new trace_invariants_t(
+            op_offline.get_value() ? drmemtrace_get_module_file_path() : "",
+            op_offline.get_value(), op_verbose.get_value());
         if (tools[1] == NULL)
             return false;
         if (!!*tools[1])
