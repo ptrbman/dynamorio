@@ -76,6 +76,7 @@ public:
     process_memref(const memref_t &memref) override;
     bool
     print_results() override;
+    void print_instr_stats(int core);
 
 //     static constexpr int
 //     tid_column_width()

@@ -537,8 +537,16 @@ missing_instructions_t::process_memref(const memref_t &memref)
 {
     current_instruction_id++;
 
-    std::cerr << "[" << current_instruction_id << "]";
-    get_opcode(memref);
+    int core;
+    if (memref.data.tid == last_thread_)
+        core = last_core_;
+    else {
+        core = core_for_thread(memref.data.tid);
+        last_thread_ = memref.data.tid;
+        std::cout << "< CORE_SWITCH_FROM_" << last_core_ << "_TO_" << core << " >"
+                  << std::endl;
+        last_core_ = core;
+    }
 
     // if (current_instruction_id > 200000){ // limit instrs. to first 200k
     //   exit(0);
@@ -551,18 +559,12 @@ missing_instructions_t::process_memref(const memref_t &memref)
         curr_thread_id = memref.marker.tid;
         std::cerr << "< CURR_CORE_ID_" << curr_core_id << " >" << std::endl;
         std::cerr << "< CURR_THREAD_ID_" << curr_thread_id << " >" << std::endl;
+        return true;
     }
 
-    int core;
-    if (memref.data.tid == last_thread_)
-        core = last_core_;
-    else {
-        core = core_for_thread(memref.data.tid);
-        last_thread_ = memref.data.tid;
-        std::cout << "< CORE_SWITCH_FROM_" << last_core_ << "_TO_" << core << " >"
-                  << std::endl;
-        last_core_ = core;
-    }
+    print_instr_stats(core);
+
+    get_opcode(memref);
 
     // Data misses
     int data_misses_l1_pre = cache_simulator_t::get_cache_metric(
@@ -640,6 +642,42 @@ missing_instructions_t::process_memref(const memref_t &memref)
     }
 
     return cache_ret;
+}
+
+void
+missing_instructions_t::print_instr_stats(int core)
+{
+    int l1_data_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 0, core,
+                                                           cache_split_t::DATA);
+    int l1_inst_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 0, core,
+                                                           cache_split_t::INSTRUCTION);
+    int l1_data_misses = cache_simulator_t::get_cache_metric(metric_name_t::MISSES, 0,
+                                                             core, cache_split_t::DATA);
+    int l1_inst_misses = cache_simulator_t::get_cache_metric(
+        metric_name_t::MISSES, 0, core, cache_split_t::INSTRUCTION);
+    int ll_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 2, core,
+                                                      cache_split_t::DATA);
+    int ll_misses = cache_simulator_t::get_cache_metric(metric_name_t::MISSES, 2, core,
+                                                        cache_split_t::DATA);
+
+    float l1_data_ratio = static_cast<float>(l1_data_misses) /
+        static_cast<float>(l1_data_misses + l1_data_hits);
+    float l1_inst_ratio = static_cast<float>(l1_inst_misses) /
+        static_cast<float>(l1_inst_misses + l1_inst_hits);
+    float ll_ratio =
+        static_cast<float>(ll_misses) / static_cast<float>(ll_misses + ll_hits);
+
+    std::cerr << "[" << current_instruction_id << "]";
+    std::cerr << "[Core "<<core<<"]";
+    std::cerr << "[L1 data hits " << l1_data_hits << "]";
+    std::cerr << "[L1 data misses " << l1_data_misses << "]";
+    std::cerr << "L1 data rolling miss ratio " << l1_data_ratio << "]";
+    std::cerr << "[L1 inst hits " << l1_inst_hits << "]";
+    std::cerr << "[L1 inst misses " << l1_inst_misses << "]";
+    std::cerr << "L1 inst rolling miss ratio " << l1_inst_ratio << "]";
+    std::cerr << "[LL hits " << ll_hits << "]";
+    std::cerr << "[LL misses " << ll_misses << "]";
+    std::cerr << "LL rolling miss ratio " << ll_ratio << "]";
 }
 
 // bool
