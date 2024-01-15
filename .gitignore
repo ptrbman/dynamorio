@@ -19,3 +19,8 @@ cscope.out
 ./01112023/parsed_traces/deprecated/merged-file.csv
 ./01112023/parsed_traces/merged_binary_all.csv
 build_no_limit
+15012024/*.txt
+15012024/*.csv
+15012024/*.dir
+01112023/*.dir
+15012024/*.zip
