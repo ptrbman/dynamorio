@@ -671,13 +671,13 @@ missing_instructions_t::print_instr_stats(int core)
     std::cerr << "[Core "<<core<<"]";
     std::cerr << "[L1 data hits " << l1_data_hits << "]";
     std::cerr << "[L1 data misses " << l1_data_misses << "]";
-    std::cerr << "L1 data rolling miss ratio " << l1_data_ratio << "]";
+    std::cerr << "[L1 data rolling miss ratio " << l1_data_ratio << "]";
     std::cerr << "[L1 inst hits " << l1_inst_hits << "]";
     std::cerr << "[L1 inst misses " << l1_inst_misses << "]";
-    std::cerr << "L1 inst rolling miss ratio " << l1_inst_ratio << "]";
+    std::cerr << "[L1 inst rolling miss ratio " << l1_inst_ratio << "]";
     std::cerr << "[LL hits " << ll_hits << "]";
     std::cerr << "[LL misses " << ll_misses << "]";
-    std::cerr << "LL rolling miss ratio " << ll_ratio << "]";
+    std::cerr << "[LL rolling miss ratio " << ll_ratio << "]";
 }
 
 // bool
