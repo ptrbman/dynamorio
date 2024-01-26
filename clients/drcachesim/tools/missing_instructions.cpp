@@ -50,7 +50,7 @@
 
 const std::string missing_instructions_t::TOOL_NAME = "Missing_Instructions tool";
 
-bool
+std::string
 missing_instructions_t::get_opcode(const memref_t &memref)
 {
 
@@ -129,7 +129,7 @@ missing_instructions_t::get_opcode(const memref_t &memref)
                               /*printed=*/nullptr);
     if (next_pc == nullptr) {
         error_string_ = "Failed to disassemble " + to_hex_string(memref.instr.addr);
-        return false;
+        return error_string_;
     }
     disasm = buf;
 
@@ -141,9 +141,9 @@ missing_instructions_t::get_opcode(const memref_t &memref)
         disasm.insert(newline + 1,
                       prefix.str() + skip_name + "                               ");
     }
-    std::cerr << disasm;
+    // std::cerr << disasm;
 
-    return true;
+    return disasm;
 }
 
 analysis_tool_t *
@@ -155,26 +155,55 @@ missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &knobs)
     : cache_simulator_t(knobs)
 {
-    insert_new_experiment(knobs);
+    last_experiment_id = insert_new_experiment(knobs);
 }
 
-void
+int
 insert_new_experiment(const cache_simulator_knobs_t &knobs)
 {
     try {
         sql::mysql::MySQL_Driver *driver = sql::mysql::get_mysql_driver_instance();
         std::unique_ptr<sql::Connection> conn(
             driver->connect("tcp://db:3306", "root", "cta"));
-        conn->setSchema("DATABASE_NAME");
+        conn->setSchema("test_db_1");
 
-        std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
-            "INSERT INTO cache_stats (core, thread_switch, core_switch, l1_data_hits, "
-            "...) VALUES (?, ?, ?, ?, ...)"));
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            conn->prepareStatement(create_experiment_insert_statement(knobs)));
 
         pstmt->executeUpdate();
+
+        std::unique_ptr<sql::Statement> stmt (conn->createStatement());
+
+        // Get the last insert id
+        std::unique_ptr<sql::ResultSet> res(stmt->executeQuery("SELECT LAST_INSERT_ID()"));
+        if (res->next()) {
+            return res->getInt64(1); // The first column in the result set
+        }
     } catch (sql::SQLException &e) {
         std::cerr << "SQLException: " << e.what();
     }
+}
+
+std::string
+create_experiment_insert_statement(const cache_simulator_knobs_t &knobs)
+{
+    std::stringstream ss;
+    ss << "INSERT INTO experiments ("
+       << "l1d_size, l1i_size, num_cores, l1i_assoc, l1d_assoc, "
+       << "ll_size, line_size, ll_assoc, model_coherence, replace_policy, "
+       << "skip_refs, warmup_refs, warmup_fraction, sim_refs, cpu_scheduling, "
+       << "use_physical, verbose"
+       << ") VALUES ("
+       << "'" << (knobs.L1D_size / 1024) << "K', "
+       << "'" << (knobs.L1I_size / 1024) << "K', " << knobs.num_cores << ", "
+       << knobs.L1I_assoc << ", " << knobs.L1D_assoc << ", "
+       << "'" << (knobs.LL_size / (1024 * 1024)) << "M', " << knobs.line_size << ", "
+       << knobs.LL_assoc << ", " << (knobs.model_coherence ? "TRUE" : "FALSE") << ", "
+       << "'" << knobs.replace_policy << "', " << knobs.skip_refs << ", "
+       << knobs.warmup_refs << ", " << knobs.warmup_fraction << ", " << knobs.sim_refs
+       << ", " << (knobs.cpu_scheduling ? "TRUE" : "FALSE") << ", "
+       << (knobs.use_physical ? "TRUE" : "FALSE") << ", " << knobs.verbose << ");";
+    return ss.str();
 }
 
 bool

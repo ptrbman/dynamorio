@@ -52,7 +52,7 @@ public:
     // XXX: Once we update our toolchains to guarantee C++17 support we could use
     // std::optional here.
 
-    bool
+    std::string
     get_opcode(const memref_t &memref);
 
     missing_instructions_t(const cache_simulator_knobs_t &knobs);
@@ -175,6 +175,7 @@ private:
     //     static constexpr int TID_COLUMN_WIDTH = 11;
     uintptr_t curr_core_id;
     memref_tid_t curr_thread_id;
+    int last_experiment_id;
 };
 
 #endif /* _MISSING_INSTRUCTIONS_H_ */
