@@ -153,6 +153,12 @@ macro (add_exported_library name type)
   add_dependencies(${name} api_headers)
 endmacro ()
 
+# Find mysql package
+find_package(MySQLConnectorCPP REQUIRED)
+target_link_libraries(drmemtrace_missing_instructions ${MYSQLCONNECTORCPP_LIBRARIES})
+
+
+
 add_exported_library(drmemtrace_reuse_distance STATIC tools/reuse_distance.cpp)
 add_exported_library(drmemtrace_histogram STATIC tools/histogram.cpp)
 add_exported_library(drmemtrace_reuse_time STATIC tools/reuse_time.cpp)
