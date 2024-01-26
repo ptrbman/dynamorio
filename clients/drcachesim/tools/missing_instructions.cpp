@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <vector>
 #include <stdexcept>
 
@@ -54,11 +55,6 @@ std::string
 missing_instructions_t::get_opcode(const memref_t &memref)
 {
 
-    if (memref.marker.type == TRACE_TYPE_MARKER) {
-    }
-
-    if (memref.marker.type == TRACE_TYPE_MARKER) {
-    }
 
     static constexpr int name_width = 12;
     if (!type_is_instr(memref.instr.type) &&
@@ -66,10 +62,9 @@ missing_instructions_t::get_opcode(const memref_t &memref)
 
         std::string name;
         switch (memref.data.type) {
-        default: std::cerr << "<entry type " << memref.data.type << ">\n"; return true;
+        default: return std::string("<entry type " + memref.data.type) + ">\n";
         case TRACE_TYPE_THREAD_EXIT:
-            std::cerr << "<thread " << memref.data.tid << " exited>\n";
-            return true;
+            return std::string("<thread " + memref.data.tid) + " exited>\n";
 
         case TRACE_TYPE_READ: name = "read"; break;
         case TRACE_TYPE_WRITE: name = "write"; break;
@@ -100,12 +95,14 @@ missing_instructions_t::get_opcode(const memref_t &memref)
         case TRACE_TYPE_PREFETCH_WRITE_L3_NT: name = "pref-w-L3-NT"; break;
         case TRACE_TYPE_HARDWARE_PREFETCH: name = "pref-HW"; break;
         }
-        std::cerr << std::left << std::setw(name_width) << name << std::right
-                  << std::setw(2) << memref.data.size << " byte(s) @ 0x" << std::hex
-                  << std::setfill('0') << std::setw(sizeof(void *) * 2)
-                  << memref.data.addr << " by PC 0x" << std::setw(sizeof(void *) * 2)
-                  << memref.data.pc << std::dec << std::setfill(' ') << "\n";
-        return true;
+        std::ostringstream oss;
+        oss << std::left << std::setw(name_width) << name << std::right << std::setw(2)
+            << memref.data.size << " byte(s) @ 0x" << std::hex << std::setfill('0')
+            << std::setw(sizeof(void *) * 2) << memref.data.addr << " by PC 0x"
+            << std::setw(sizeof(void *) * 2) << memref.data.pc << std::dec
+            << std::setfill(' ') << "\n";
+
+        return oss.str();
     }
 
     std::cerr << std::left << std::setw(name_width) << "ifetch" << std::right
@@ -172,10 +169,11 @@ insert_new_experiment(const cache_simulator_knobs_t &knobs)
 
         pstmt->executeUpdate();
 
-        std::unique_ptr<sql::Statement> stmt (conn->createStatement());
+        std::unique_ptr<sql::Statement> stmt(conn->createStatement());
 
         // Get the last insert id
-        std::unique_ptr<sql::ResultSet> res(stmt->executeQuery("SELECT LAST_INSERT_ID()"));
+        std::unique_ptr<sql::ResultSet> res(
+            stmt->executeQuery("SELECT LAST_INSERT_ID()"));
         if (res->next()) {
             return res->getInt64(1); // The first column in the result set
         }
@@ -284,15 +282,17 @@ missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
     }
 
     addr_t pc, addr;
-    if (type_is_instr(memref.data.type))
+    if (type_is_instr(memref.data.type)) {
         pc = memref.instr.addr;
+        addr = pc;
+    }
     else {
         assert(type_is_prefetch(memref.data.type) ||
                memref.data.type == TRACE_TYPE_READ ||
                memref.data.type == TRACE_TYPE_WRITE);
         pc = memref.data.pc;
+        addr = memref.data.addr;
     }
-    addr = memref.data.addr;
 
     std::stringstream ss;
     ss << std::hex << addr;
@@ -309,6 +309,7 @@ missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
     get_opcode(memref);
     return cache_ret;
 }
+
 
 void
 missing_instructions_t::print_instr_stats(int core, bool thread_switch, bool core_switch,

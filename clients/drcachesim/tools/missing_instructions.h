@@ -76,8 +76,28 @@ public:
     process_memref(const memref_t &memref) override;
     bool
     print_results() override;
-    void
-    print_instr_stats(int core, bool thread_switch, bool core_switch, const memref_t &memref);
+    struct cache_metric_statistics {
+        int current_instruction_id;
+        int core;
+        bool thread_switch;
+        bool core_switch;
+        int l1_data_hits;
+        int l1_data_misses;
+        float l1_data_ratio;
+        int l1_inst_hits;
+        int l1_inst_misses;
+        float l1_inst_ratio;
+        int ll_hits;
+        int ll_misses;
+        float ll_ratio;
+    };
+    struct miss_counts {
+        std::string access_address;
+        std
+    };
+    cache_metric_statistics
+    print_instr_stats(int core, bool thread_switch, bool core_switch,
+                      const memref_t &memref);
     bool
     print_miss_stats_and_run_cache_instr_sim(int core, const memref_t &memref);
 
