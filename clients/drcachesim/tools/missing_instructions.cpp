@@ -38,6 +38,10 @@
 
 #include "dr_api.h"
 #include "missing_instructions.h"
+#include <mysql_driver.h>
+#include <mysql_connection.h>
+#include <cppconn/prepared_statement.h>
+
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
@@ -151,6 +155,26 @@ missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &knobs)
     : cache_simulator_t(knobs)
 {
+    insert_new_experiment(knobs);
+}
+
+void
+insert_new_experiment(const cache_simulator_knobs_t &knobs)
+{
+    try {
+        sql::mysql::MySQL_Driver *driver = sql::mysql::get_mysql_driver_instance();
+        std::unique_ptr<sql::Connection> conn(
+            driver->connect("tcp://db:3306", "root", "cta"));
+        conn->setSchema("DATABASE_NAME");
+
+        std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
+            "INSERT INTO cache_stats (core, thread_switch, core_switch, l1_data_hits, "
+            "...) VALUES (?, ?, ?, ?, ...)"));
+
+        pstmt->executeUpdate();
+    } catch (sql::SQLException &e) {
+        std::cerr << "SQLException: " << e.what();
+    }
 }
 
 bool
@@ -241,8 +265,14 @@ missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
     }
     addr = memref.data.addr;
 
-    std::cerr << "[Access address: " << addr << "]";
-    std::cerr << "[PC: " << pc << "]";
+    std::stringstream ss;
+    ss << std::hex << addr;
+    std::string address_hex = ss.str();
+    ss << std::hex << pc;
+    std::string pc_hex = ss.str();
+
+    std::cerr << "[Access address: " << address_hex << "]";
+    std::cerr << "[PC: " << pc_hex << "]";
     std::cerr << "[L1D miss: " << data_miss_l1 << "]";
     std::cerr << "[L1I miss: " << inst_miss_l1 << "]";
     std::cerr << "[LL miss: " << unified_miss_ll << "]";
@@ -288,6 +318,27 @@ missing_instructions_t::print_instr_stats(int core, bool thread_switch, bool cor
     std::cerr << "[LL hits " << ll_hits << "]";
     std::cerr << "[LL misses " << ll_misses << "]";
     std::cerr << "[LL rolling miss ratio " << ll_ratio << "]";
+}
+
+void insertStatsToDatabase(/* Parameters representing each stat */)
+{
+    try {
+        sql::mysql::MySQL_Driver *driver = sql::mysql::get_mysql_driver_instance();
+        std::unique_ptr<sql::Connection> conn(
+            driver->connect("tcp://HOST:3306", "USERNAME", "PASSWORD"));
+        conn->setSchema("DATABASE_NAME");
+
+        std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
+            "INSERT INTO cache_stats (core, thread_switch, core_switch, l1_data_hits, "
+            "...) VALUES (?, ?, ?, ?, ...)"));
+
+        pstmt->setInt(1, core);
+        pstmt->setInt(2, thread_switch);
+        // Set the rest of the parameters similarly
+        pstmt->executeUpdate();
+    } catch (sql::SQLException &e) {
+        std::cerr << "SQLException: " << e.what();
+    }
 }
 
 bool

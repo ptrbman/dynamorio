@@ -38,6 +38,7 @@
 #include <string>
 #include "analysis_tool.h"
 
+
 /**
  * @file drmemtrace/cache_simulator_create.h
  * @brief DrMemtrace cache simulator creation.

@@ -153,10 +153,6 @@ macro (add_exported_library name type)
   add_dependencies(${name} api_headers)
 endmacro ()
 
-# Find mysql package
-find_package(MySQLConnectorCPP REQUIRED)
-target_link_libraries(drmemtrace_missing_instructions ${MYSQLCONNECTORCPP_LIBRARIES})
-
 
 
 add_exported_library(drmemtrace_reuse_distance STATIC tools/reuse_distance.cpp)
@@ -281,6 +277,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/reader)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/tracer)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/scheduler)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+# Manually set the include directory for MySQL Connector/C++
+target_link_libraries(drmemtrace_missing_instructions mysqlcppconn)
 
 add_exported_library(drmemtrace_analyzer STATIC
   analyzer.cpp
