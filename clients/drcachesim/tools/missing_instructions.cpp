@@ -55,7 +55,6 @@ std::string
 missing_instructions_t::get_opcode(const memref_t &memref)
 {
 
-
     static constexpr int name_width = 12;
     if (!type_is_instr(memref.instr.type) &&
         memref.data.type != TRACE_TYPE_INSTR_NO_FETCH) {
@@ -285,8 +284,7 @@ missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
     if (type_is_instr(memref.data.type)) {
         pc = memref.instr.addr;
         addr = pc;
-    }
-    else {
+    } else {
         assert(type_is_prefetch(memref.data.type) ||
                memref.data.type == TRACE_TYPE_READ ||
                memref.data.type == TRACE_TYPE_WRITE);
@@ -310,8 +308,7 @@ missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
     return cache_ret;
 }
 
-
-void
+missing_instructions_t::cache_metric_statistics
 missing_instructions_t::print_instr_stats(int core, bool thread_switch, bool core_switch,
                                           const memref_t &memref)
 {
@@ -335,19 +332,22 @@ missing_instructions_t::print_instr_stats(int core, bool thread_switch, bool cor
     float ll_ratio =
         static_cast<float>(ll_misses) / static_cast<float>(ll_misses + ll_hits);
 
-    std::cerr << "[" << current_instruction_id << "]";
-    std::cerr << "[Core " << core << "]";
-    std::cerr << "[Thread switch: " << thread_switch << "]";
-    std::cerr << "[Core switch: " << core_switch << "]";
-    std::cerr << "[L1 data hits " << l1_data_hits << "]";
-    std::cerr << "[L1 data misses " << l1_data_misses << "]";
-    std::cerr << "[L1 data rolling miss ratio " << l1_data_ratio << "]";
-    std::cerr << "[L1 inst hits " << l1_inst_hits << "]";
-    std::cerr << "[L1 inst misses " << l1_inst_misses << "]";
-    std::cerr << "[L1 inst rolling miss ratio " << l1_inst_ratio << "]";
-    std::cerr << "[LL hits " << ll_hits << "]";
-    std::cerr << "[LL misses " << ll_misses << "]";
-    std::cerr << "[LL rolling miss ratio " << ll_ratio << "]";
+    missing_instructions_t::cache_metric_statistics stats;
+    stats.current_instruction_id = current_instruction_id;
+    stats.core = core;
+    stats.thread_switch = thread_switch;
+    stats.core_switch = core_switch;
+    stats.l1_data_misses = l1_data_misses;
+    stats.l1_data_hits = l1_data_hits;
+    stats.l1_inst_hits = l1_inst_hits;
+    stats.l1_inst_misses = l1_inst_misses;
+    stats.l1_data_ratio = l1_data_ratio;
+    stats.l1_inst_ratio = l1_inst_ratio;
+    stats.ll_hits = ll_hits;
+    stats.ll_misses = ll_misses;
+    stats.ll_ratio = ll_ratio;
+
+    return stats;
 }
 
 void insertStatsToDatabase(/* Parameters representing each stat */)

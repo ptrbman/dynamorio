@@ -93,12 +93,18 @@ public:
     };
     struct miss_counts {
         std::string access_address;
-        std
+        std::string pc_address;
+        bool l1d_miss;
+        bool l1i_miss;
+        bool ll_miss;
+        std::string instr_type;
+        uint8_t byte_count;
+        std::string disassembly_string;
     };
     cache_metric_statistics
     print_instr_stats(int core, bool thread_switch, bool core_switch,
                       const memref_t &memref);
-    bool
+    miss_counts
     print_miss_stats_and_run_cache_instr_sim(int core, const memref_t &memref);
 
     //     static constexpr int
