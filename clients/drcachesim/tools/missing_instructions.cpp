@@ -226,9 +226,10 @@ missing_instructions_t::process_memref(const memref_t &memref)
 
     print_instr_stats(core, thread_switch, core_switch, memref);
     return print_miss_stats_and_run_cache_instr_sim(core, memref);
+    // TODO: Implementiraj ovdje da se pusha sve na db.
 }
 
-bool
+missing_instructions_t::miss_counts
 missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
                                                                  const memref_t &memref)
 {
