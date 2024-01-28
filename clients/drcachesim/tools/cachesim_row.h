@@ -3,6 +3,7 @@
 
 #    include <iostream>
 
+/// @brief Class contains data used for inserting new execution row into a DB.
 class cachesim_row {
 private:
     /* data */
