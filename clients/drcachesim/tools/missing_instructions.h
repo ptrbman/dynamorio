@@ -53,8 +53,7 @@ public:
     // XXX: Once we update our toolchains to guarantee C++17 support we could use
     // std::optional here.
 
-    std::string
-    get_opcode(const memref_t &memref);
+    void get_opcode(const memref_t &memref, cachesim_row &row);
 
     missing_instructions_t(const cache_simulator_knobs_t &knobs);
     // missing_instructions_t(const std::string &module_file_path, memref_tid_t thread,

@@ -49,7 +49,6 @@
 #include <sstream>
 #include <vector>
 #include <stdexcept>
-#include <memory>
 
 const std::string missing_instructions_t::TOOL_NAME = "Missing_Instructions tool";
 
@@ -66,9 +65,10 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
         default: {
             std::ostringstream oss;
             oss << memref.data.type;
-            row.set_instr_type("entry_type_" + oss.str());
+            name = "entry_type_" + oss.str();
+            break;
         }
-        case TRACE_TYPE_THREAD_EXIT: row.set_instr_type("thread_exit"); break;
+        case TRACE_TYPE_THREAD_EXIT: name = "thread_exit"; break;
 
         case TRACE_TYPE_READ: name = "read"; break;
         case TRACE_TYPE_WRITE: name = "write"; break;
@@ -224,7 +224,7 @@ missing_instructions_t::process_memref(const memref_t &memref)
         last_core_ = core;
     }
 
-    std::unique_ptr<cachesim_row> row = std::make_unique<cachesim_row>();
+    std::unique_ptr<cachesim_row> row (new cachesim_row());
 
     update_instruction_stats(core, thread_switch, core_switch, memref, *row);
     update_miss_stats(core, memref, *row);
