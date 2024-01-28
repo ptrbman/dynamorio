@@ -189,7 +189,7 @@ missing_instructions_t::create_experiment_insert_statement(
        << "l1d_size, l1i_size, num_cores, l1i_assoc, l1d_assoc, "
        << "ll_size, line_size, ll_assoc, model_coherence, replace_policy, "
        << "skip_refs, warmup_refs, warmup_fraction, sim_refs, cpu_scheduling, "
-       << "use_physical, verbose"
+       << "use_physical"
        << ") VALUES ("
        << "'" << (knobs.L1D_size / 1024) << "K', "
        << "'" << (knobs.L1I_size / 1024) << "K', " << knobs.num_cores << ", "
@@ -197,9 +197,9 @@ missing_instructions_t::create_experiment_insert_statement(
        << "'" << (knobs.LL_size / (1024 * 1024)) << "M', " << knobs.line_size << ", "
        << knobs.LL_assoc << ", " << (knobs.model_coherence ? "TRUE" : "FALSE") << ", "
        << "'" << knobs.replace_policy << "', " << knobs.skip_refs << ", "
-       << knobs.warmup_refs << ", " << knobs.warmup_fraction << ", " << knobs.sim_refs
+       << knobs.warmup_refs << ", " << knobs.warmup_fraction << ", " << 0
        << ", " << (knobs.cpu_scheduling ? "TRUE" : "FALSE") << ", "
-       << (knobs.use_physical ? "TRUE" : "FALSE") << ", " << knobs.verbose << ");";
+       << (knobs.use_physical ? "TRUE" : "FALSE") << ");";
     return ss.str();
 }
 
