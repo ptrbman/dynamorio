@@ -101,11 +101,6 @@ public:
         uint8_t byte_count;
         std::string disassembly_string;
     };
-    cache_metric_statistics
-    print_instr_stats(int core, bool thread_switch, bool core_switch,
-                      const memref_t &memref);
-    miss_counts
-    print_miss_stats_and_run_cache_instr_sim(int core, const memref_t &memref);
 
     //     static constexpr int
     //     tid_column_width()
@@ -202,6 +197,18 @@ private:
     uintptr_t curr_core_id;
     memref_tid_t curr_thread_id;
     int last_experiment_id;
+    int
+    insert_new_experiment(const cache_simulator_knobs_t &knobs);
+    std::string
+    create_experiment_insert_statement(const cache_simulator_knobs_t &knobs);
+    cache_metric_statistics
+    print_instr_stats(int core, bool thread_switch, bool core_switch,
+                      const memref_t &memref, cachesim_row &row);
+    miss_counts
+    print_miss_stats_and_run_cache_instr_sim(int core, const memref_t &memref,
+                                             cachesim_row &row);
+    void
+    insert_new_row(const cachesim_row &row);
 };
 
 #endif /* _MISSING_INSTRUCTIONS_H_ */

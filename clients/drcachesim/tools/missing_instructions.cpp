@@ -41,6 +41,7 @@
 #include <mysql_driver.h>
 #include <mysql_connection.h>
 #include <cppconn/prepared_statement.h>
+#include "cachesim_row.h"
 
 #include <algorithm>
 #include <iomanip>
@@ -48,6 +49,7 @@
 #include <sstream>
 #include <vector>
 #include <stdexcept>
+#include <memory>
 
 const std::string missing_instructions_t::TOOL_NAME = "Missing_Instructions tool";
 
@@ -155,7 +157,7 @@ missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &kn
 }
 
 int
-insert_new_experiment(const cache_simulator_knobs_t &knobs)
+missing_instructions_t::insert_new_experiment(const cache_simulator_knobs_t &knobs)
 {
     try {
         sql::mysql::MySQL_Driver *driver = sql::mysql::get_mysql_driver_instance();
@@ -175,14 +177,18 @@ insert_new_experiment(const cache_simulator_knobs_t &knobs)
             stmt->executeQuery("SELECT LAST_INSERT_ID()"));
         if (res->next()) {
             return res->getInt64(1); // The first column in the result set
+        } else {
+            return -1;
         }
     } catch (sql::SQLException &e) {
         std::cerr << "SQLException: " << e.what();
+        return -1;
     }
 }
 
 std::string
-create_experiment_insert_statement(const cache_simulator_knobs_t &knobs)
+missing_instructions_t::create_experiment_insert_statement(
+    const cache_simulator_knobs_t &knobs)
 {
     std::stringstream ss;
     ss << "INSERT INTO experiments ("
@@ -224,9 +230,12 @@ missing_instructions_t::process_memref(const memref_t &memref)
         last_core_ = core;
     }
 
+    std::unique_ptr<cachesim_row> row = std::make_unique<cachesim_row>();
+
     print_instr_stats(core, thread_switch, core_switch, memref);
-    return print_miss_stats_and_run_cache_instr_sim(core, memref);
+    print_miss_stats_and_run_cache_instr_sim(core, memref);
     // TODO: Implementiraj ovdje da se pusha sve na db.
+    return "";
 }
 
 missing_instructions_t::miss_counts
@@ -241,8 +250,8 @@ missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
     int unified_misses_ll_pre = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 2, core, cache_split_t::DATA);
 
-    bool cache_ret = cache_simulator_t::process_memref(memref);
-
+    // bool cache_ret = cache_simulator_t::process_memref(memref);
+    cache_simulator_t::process_memref(memref);
     int data_misses_l1_post = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 0, core, cache_split_t::DATA);
     int inst_misses_l1_post = cache_simulator_t::get_cache_metric(
@@ -306,12 +315,13 @@ missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
     std::cerr << "[LL miss: " << unified_miss_ll << "]";
 
     get_opcode(memref);
-    return cache_ret;
+    missing_instructions_t::miss_counts counts;
+    return counts;
 }
 
 missing_instructions_t::cache_metric_statistics
 missing_instructions_t::print_instr_stats(int core, bool thread_switch, bool core_switch,
-                                          const memref_t &memref)
+                                          const memref_t &memref, cachesim_row &row)
 {
     int l1_data_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 0, core,
                                                            cache_split_t::DATA);
@@ -351,26 +361,27 @@ missing_instructions_t::print_instr_stats(int core, bool thread_switch, bool cor
     return stats;
 }
 
-void insertStatsToDatabase(/* Parameters representing each stat */)
-{
-    try {
-        sql::mysql::MySQL_Driver *driver = sql::mysql::get_mysql_driver_instance();
-        std::unique_ptr<sql::Connection> conn(
-            driver->connect("tcp://HOST:3306", "USERNAME", "PASSWORD"));
-        conn->setSchema("DATABASE_NAME");
+// TODO: implement this
+// void insertStatsToDatabase(/* Parameters representing each stat */)
+// {
+//     try {
+//         sql::mysql::MySQL_Driver *driver = sql::mysql::get_mysql_driver_instance();
+//         std::unique_ptr<sql::Connection> conn(
+//             driver->connect("tcp://HOST:3306", "USERNAME", "PASSWORD"));
+//         conn->setSchema("DATABASE_NAME");
 
-        std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
-            "INSERT INTO cache_stats (core, thread_switch, core_switch, l1_data_hits, "
-            "...) VALUES (?, ?, ?, ?, ...)"));
+//         std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
+//             "INSERT INTO cache_stats (core, thread_switch, core_switch, l1_data_hits, "
+//             "...) VALUES (?, ?, ?, ?, ...)"));
 
-        pstmt->setInt(1, core);
-        pstmt->setInt(2, thread_switch);
-        // Set the rest of the parameters similarly
-        pstmt->executeUpdate();
-    } catch (sql::SQLException &e) {
-        std::cerr << "SQLException: " << e.what();
-    }
-}
+//         pstmt->setInt(1, core);
+//         pstmt->setInt(2, thread_switch);
+//         // Set the rest of the parameters similarly
+//         pstmt->executeUpdate();
+//     } catch (sql::SQLException &e) {
+//         std::cerr << "SQLException: " << e.what();
+//     }
+// }
 
 bool
 missing_instructions_t::print_results()
