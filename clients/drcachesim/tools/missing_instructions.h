@@ -40,6 +40,7 @@
 #include <unordered_set>
 
 #include "../simulator/cache_simulator.h"
+#include "cachesim_row.h"
 #include "analysis_tool.h"
 #include "raw2trace.h"
 #include "raw2trace_directory.h"
@@ -76,31 +77,6 @@ public:
     process_memref(const memref_t &memref) override;
     bool
     print_results() override;
-    struct cache_metric_statistics {
-        int current_instruction_id;
-        int core;
-        bool thread_switch;
-        bool core_switch;
-        int l1_data_hits;
-        int l1_data_misses;
-        float l1_data_ratio;
-        int l1_inst_hits;
-        int l1_inst_misses;
-        float l1_inst_ratio;
-        int ll_hits;
-        int ll_misses;
-        float ll_ratio;
-    };
-    struct miss_counts {
-        std::string access_address;
-        std::string pc_address;
-        bool l1d_miss;
-        bool l1i_miss;
-        bool ll_miss;
-        std::string instr_type;
-        uint8_t byte_count;
-        std::string disassembly_string;
-    };
 
     //     static constexpr int
     //     tid_column_width()
@@ -201,12 +177,11 @@ private:
     insert_new_experiment(const cache_simulator_knobs_t &knobs);
     std::string
     create_experiment_insert_statement(const cache_simulator_knobs_t &knobs);
-    cache_metric_statistics
-    print_instr_stats(int core, bool thread_switch, bool core_switch,
-                      const memref_t &memref, cachesim_row &row);
-    miss_counts
-    print_miss_stats_and_run_cache_instr_sim(int core, const memref_t &memref,
-                                             cachesim_row &row);
+    void
+    update_instruction_stats(int core, bool thread_switch, bool core_switch,
+                             const memref_t &memref, cachesim_row &row);
+    void
+    update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
     insert_new_row(const cachesim_row &row);
 };

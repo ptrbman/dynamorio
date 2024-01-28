@@ -1,7 +1,7 @@
 #ifndef _CACHE_SIMULATOR_ROW_H_
-#    define _CACHE_SIMULATOR_H_ 1
+#define _CACHE_SIMULATOR_ROW_H_ 1
 
-#    include <iostream>
+#include <iostream>
 
 /// @brief Class contains data used for inserting new execution row into a DB.
 class cachesim_row {
@@ -30,8 +30,8 @@ private:
     float ll_ratio;
 
 public:
-    cachesim_row(/* args */);
-    ~cachesim_row();
+    // cachesim_row(/* args */);
+    // ~cachesim_row();
 
     // Setters declarations
     void
@@ -122,12 +122,12 @@ public:
     get_ll_ratio() const;
 };
 
-cachesim_row::cachesim_row(/* args */)
-{
-}
+// cachesim_row::cachesim_row(/* args */)
+// {
+// }
 
-cachesim_row::~cachesim_row()
-{
-}
+// cachesim_row::~cachesim_row()
+// {
+// }
 
 #endif /*_CACHE_SIMULATOR_ROW_H_*/
