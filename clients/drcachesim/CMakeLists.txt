@@ -275,12 +275,12 @@ add_executable(drcachesim ${drcachesim_srcs})
 # In order to embed raw2trace we need to be standalone:
 configure_DynamoRIO_standalone(drcachesim)
 # Link in our tools:
+
 target_link_libraries(drcachesim drmemtrace_simulator drmemtrace_reuse_distance
-  drmemtrace_histogram drmemtrace_reuse_time drmemtrace_basic_counts
-  drmemtrace_opcode_mix drmemtrace_view drmemtrace_missing_instructions drmemtrace_func_view
-  drmemtrace_raw2trace directory_iterator drmemtrace_invariant_checker
-   drmemtrace_syscall_mix  
-  drmemtrace_schedule_stats)
+drmemtrace_histogram drmemtrace_reuse_time drmemtrace_basic_counts
+drmemtrace_opcode_mix drmemtrace_syscall_mix drmemtrace_view drmemtrace_missing_instructions drmemtrace_func_view
+drmemtrace_raw2trace directory_iterator drmemtrace_invariant_checker
+drmemtrace_schedule_stats)
 if (UNIX)
     target_link_libraries(drcachesim dl)
 endif ()
@@ -826,7 +826,7 @@ if (BUILD_TESTS)
   target_link_libraries(tool.drcachesim.core_sharded test_helpers
     drmemtrace_raw2trace drmemtrace_simulator drmemtrace_reuse_distance
     drmemtrace_histogram drmemtrace_reuse_time drmemtrace_basic_counts
-    drmemtrace_opcode_mix drmemtrace_syscall_mix drmemtrace_view drmemtrace_func_view
+    drmemtrace_opcode_mix drmemtrace_syscall_mix drmemtrace_view drmemtrace_missing_instructions drmemtrace_func_view
     drmemtrace_raw2trace directory_iterator drmemtrace_invariant_checker
     drmemtrace_schedule_stats drmemtrace_analyzer)
   if (UNIX)

@@ -40,11 +40,15 @@
 #include <unordered_set>
 
 #include "../simulator/cache_simulator.h"
+#include "dr_api.h" // Must be before trace_entry.h from analysis_tool.h.
 #include "analysis_tool.h"
-#include "raw2trace.h"
-#include "raw2trace_directory.h"
+#include "memref.h"
+// #include "raw2trace.h"
+// #include "raw2trace_directory.h"
 
-// class missing_instructions_t : public analysis_tool_t {
+
+namespace dynamorio {
+namespace drmemtrace {
 class missing_instructions_t : public cache_simulator_t {
 public:
     // The module_file_path is optional and unused for traces with
@@ -169,6 +173,10 @@ private:
 //     static constexpr int TID_COLUMN_WIDTH = 11;
   uintptr_t curr_core_id;
   memref_tid_t curr_thread_id;
+  int last_core_;
 };
+
+} // namespace drmemtrace
+} // namespace dynamorio
 
 #endif /* _MISSING_INSTRUCTIONS_H_ */

@@ -43,6 +43,14 @@
 #include <iostream>
 #include <vector>
 #include <stdexcept>
+#include "memref.h"
+#include "memtrace_stream.h"
+// #include "raw2trace.h"
+// #include "raw2trace_directory.h"
+
+namespace dynamorio {
+namespace drmemtrace {
+
 
 const std::string missing_instructions_t::TOOL_NAME = "Missing_Instructions tool";
 
@@ -1035,3 +1043,6 @@ missing_instructions_t::print_results()
     // std::cerr << std::setw(15) << num_disasm_instrs_ << " : total instructions\n";
     return true;
 }
+
+} // namespace drmemtrace
+} // namespace dynamorio
