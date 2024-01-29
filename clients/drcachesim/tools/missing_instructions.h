@@ -39,12 +39,13 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "../simulator/cache_simulator.h"
 #include "dr_api.h" // Must be before trace_entry.h from analysis_tool.h.
 #include "analysis_tool.h"
+#include "../simulator/cache_simulator.h"
+
 #include "memref.h"
-// #include "raw2trace.h"
-// #include "raw2trace_directory.h"
+#include "raw2trace.h"
+#include "raw2trace_directory.h"
 
 
 namespace dynamorio {
@@ -173,7 +174,6 @@ private:
 //     static constexpr int TID_COLUMN_WIDTH = 11;
   uintptr_t curr_core_id;
   memref_tid_t curr_thread_id;
-  int last_core_;
 };
 
 } // namespace drmemtrace

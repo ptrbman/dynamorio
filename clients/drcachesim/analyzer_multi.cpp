@@ -54,6 +54,7 @@
 #include "simulator/tlb_simulator_create.h"
 #include "tools/basic_counts_create.h"
 #include "tools/func_view_create.h"
+#include "tools/missing_instructions_create.h"
 #include "tools/histogram_create.h"
 #include "tools/invariant_checker.h"
 #include "tools/invariant_checker_create.h"
@@ -427,13 +428,17 @@ analyzer_multi_t::create_analysis_tool_from_options(const std::string &simulator
     } else if (simulator_type == SCHEDULE_STATS) {
         return schedule_stats_tool_create(op_schedule_stats_print_every.get_value(),
                                           op_verbose.get_value());
+    } else if (op_simulator_type.get_value() == MISSING_INSTRUCTIONS) {
+
+      cache_simulator_knobs_t *knobs = get_cache_simulator_knobs();
+      return missing_instructions_tool_create(*knobs);
     } else {
         auto tool = create_external_tool(simulator_type);
         if (tool == nullptr) {
             ERRMSG("Usage error: unsupported analyzer type \"%s\". "
                    "Please choose " CPU_CACHE ", " MISS_ANALYZER ", " TLB ", " HISTOGRAM
                    ", " REUSE_DIST ", " BASIC_COUNTS ", " OPCODE_MIX ", " SYSCALL_MIX
-                   ", " VIEW ", " FUNC_VIEW ", or some external analyzer.\n",
+                   ", " VIEW ", " MISSING_INSTRUCTIONS ", " FUNC_VIEW ", or some external analyzer.\n",
                    simulator_type.c_str());
         }
         return tool;

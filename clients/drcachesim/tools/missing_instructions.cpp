@@ -45,8 +45,8 @@
 #include <stdexcept>
 #include "memref.h"
 #include "memtrace_stream.h"
-// #include "raw2trace.h"
-// #include "raw2trace_directory.h"
+#include "raw2trace.h"
+#include "raw2trace_directory.h"
 
 namespace dynamorio {
 namespace drmemtrace {
@@ -547,13 +547,13 @@ missing_instructions_t::process_memref(const memref_t &memref)
 
     int core;
     if (memref.data.tid == last_thread_)
-        core = last_core_;
+        core = last_core_index_;
     else {
         core = core_for_thread(memref.data.tid);
         last_thread_ = memref.data.tid;
-        std::cout << "< CORE_SWITCH_FROM_" << last_core_ << "_TO_" << core << " >"
+        std::cout << "< CORE_SWITCH_FROM_" << last_core_index_ << "_TO_" << core << " >"
                   << std::endl;
-        last_core_ = core;
+        last_core_index_ = core;
     }
 
     // if (current_instruction_id > 200000){ // limit instrs. to first 200k
