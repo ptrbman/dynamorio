@@ -308,7 +308,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/reader)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/tracer)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/scheduler)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
+# Manually set the include directory for MySQL Connector/C++
+target_link_libraries(drmemtrace_missing_instructions mysqlcppconn)
 if (BUILD_PT_POST_PROCESSOR)
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/drpt2trace)
 endif (BUILD_PT_POST_PROCESSOR)
