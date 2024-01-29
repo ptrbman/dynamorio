@@ -170,7 +170,9 @@ missing_instructions_t::insert_new_experiment(const cache_simulator_knobs_t &kno
         std::unique_ptr<sql::ResultSet> res(
             stmt->executeQuery("SELECT LAST_INSERT_ID()"));
         if (res->next()) {
-            return res->getInt64(1); // The first column in the result set
+            int64_t to_return = res->getInt64(1);
+            std::cerr << "Returning " << to_return << std::endl;
+            return to_return; // The first column in the result set
         } else {
             return -1;
         }
@@ -223,13 +225,13 @@ missing_instructions_t::process_memref(const memref_t &memref)
             core_switch = true;
         last_core_ = core;
     }
-
+    std::cerr << "Doing " <<current_instruction_id<<std::endl;
     std::unique_ptr<cachesim_row> row (new cachesim_row());
 
     update_instruction_stats(core, thread_switch, core_switch, memref, *row);
     update_miss_stats(core, memref, *row);
     insert_new_row(*row);
-    return "";
+    return true;
 }
 
 void
@@ -276,6 +278,8 @@ missing_instructions_t::insert_new_row(const cachesim_row &row)
 
         // Execute the prepared statement
         pstmt->executeUpdate();
+
+        std::cerr << "How far: "<<row.get_current_instruction_id() << std::endl;
     } catch (sql::SQLException &e) {
         std::cerr << "SQLException: " << e.what();
         throw e;
