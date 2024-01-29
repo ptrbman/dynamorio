@@ -1,6 +1,6 @@
 /* **********************************************************
  * Copyright (c) 2017-2023 Google, Inc.  All rights reserved.
- * Copyright (c) 2016-2023 ARM Limited. All rights reserved.
+ * Copyright (c) 2016-2024 ARM Limited. All rights reserved.
  * **********************************************************/
 
 /*
@@ -47,6 +47,27 @@
 #include "instr_create_shared.h"
 
 #include "codec.h"
+
+/* XXX: The make/aarch64_check_codec_order.py script assumes function
+ * signatures occupy a single line!  We thus locally use shorter markers
+ * here.
+ */
+#ifndef IN
+#    define IN
+#endif
+#ifndef OUT
+#    define OUT
+#endif
+
+/* Tag granule scaling */
+const uint log2_tag_granule = 4;
+
+/* Memory op indexing type */
+enum mem_op_index_t {
+    MEM_OP_INDEX_POST = 1,
+    MEM_OP_INDEX_NONE = 2, // AKA offset
+    MEM_OP_INDEX_PRE = 3,
+};
 
 /* Decode immediate argument of bitwise operations.
  * Returns zero if the encoding is invalid.
@@ -569,7 +590,7 @@ decode_vreg(aarch64_reg_offset scale, uint n)
 
 /* Encode SIMD/FP register. */
 static inline bool
-encode_vreg(INOUT opnd_size_t *x, OUT uint *r, reg_id_t reg)
+encode_vreg(OUT opnd_size_t *x, OUT uint *r, reg_id_t reg)
 {
     opnd_size_t sz;
     uint n;
@@ -605,7 +626,7 @@ encode_vreg(INOUT opnd_size_t *x, OUT uint *r, reg_id_t reg)
 }
 
 static inline bool
-is_vreg(INOUT opnd_size_t *x, OUT uint *r, opnd_t opnd)
+is_vreg(OUT opnd_size_t *x, OUT uint *r, opnd_t opnd)
 {
     return opnd_is_reg(opnd) && encode_vreg(x, r, opnd_get_reg(opnd));
 }
@@ -1011,7 +1032,7 @@ get_elements_in_sve_vector(aarch64_reg_offset element_size)
 {
     const uint element_length =
         opnd_size_in_bits(get_opnd_size_from_offset(element_size));
-    return opnd_size_in_bits(OPSZ_SVE_VL) / element_length;
+    return opnd_size_in_bits(OPSZ_SVE_VL_BYTES) / element_length;
 }
 
 /*******************************************************************************
@@ -1577,15 +1598,22 @@ decode_single_sized(reg_id_t min_reg, reg_id_t max_reg, uint pos_start, uint bit
         reg_id = reg_id + min_reg - max_reg - 1;
 
     *opnd = opnd_create_reg_element_vector(reg_id, size);
+
+    if (offset > 0) {
+        opnd->aux.flags |= DR_OPND_IMPLICIT;
+    }
+
     return true;
 }
 
 static inline bool
 decode_sized_base(uint pos_start, uint size_start, uint min_size, uint max_size,
-                  reg_id_t min_reg, reg_id_t max_reg, uint offset, uint enc, byte *pc,
-                  OUT opnd_t *opnd)
+                  uint size_offset, reg_id_t min_reg, reg_id_t max_reg, uint offset,
+                  uint enc, byte *pc, OUT opnd_t *opnd)
 {
     aarch64_reg_offset bit_size = extract_uint(enc, size_start, 2);
+    ASSERT(bit_size >= size_offset);
+    bit_size -= size_offset;
     if (bit_size < min_size)
         return false;
     if (bit_size > max_size)
@@ -1597,8 +1625,8 @@ decode_sized_base(uint pos_start, uint size_start, uint min_size, uint max_size,
 
 static inline bool
 encode_sized_base(uint pos_start, uint size_start, uint min_size, uint max_size,
-                  opnd_size_t vec_size, uint offset, bool encode_size, opnd_t opnd,
-                  OUT uint *enc_out)
+                  uint size_offset, opnd_size_t vec_size, uint offset, bool encode_size,
+                  opnd_t opnd, OUT uint *enc_out)
 {
     if (!opnd_is_element_vector_reg(opnd))
         return false;
@@ -1612,6 +1640,11 @@ encode_sized_base(uint pos_start, uint size_start, uint min_size, uint max_size,
     if (size < min_size)
         return false;
 
+    /* DR_OPND_IMPLICIT should be set if using an offset */
+    if ((offset > 0) != ((opnd.aux.flags & DR_OPND_IMPLICIT) ? true : false)) {
+        return false;
+    }
+
     uint reg_number;
     if (!is_vreg(&vec_size, &reg_number, opnd))
         return false;
@@ -1622,8 +1655,10 @@ encode_sized_base(uint pos_start, uint size_start, uint min_size, uint max_size,
     }
 
     *enc_out |= (reg_number << pos_start);
-    if (encode_size)
-        *enc_out |= (size << size_start);
+    if (encode_size) {
+        ASSERT(size + size_offset <= 0b11);
+        *enc_out |= ((size + size_offset) << size_start);
+    }
 
     return true;
 }
@@ -1632,24 +1667,24 @@ static inline bool
 encode_single_sized(opnd_size_t vec_size, uint pos_start, aarch64_reg_offset bit_size,
                     uint offset, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_base(pos_start, 0, bit_size, bit_size, vec_size, offset, false,
+    return encode_sized_base(pos_start, 0, bit_size, bit_size, 0, vec_size, offset, false,
                              opnd, enc_out);
 }
 
 static inline bool
-decode_sized_z(uint pos_start, uint size_start, uint min_size, uint max_size, uint offset,
-               uint enc, byte *pc, OUT opnd_t *opnd)
+decode_sized_z(uint pos_start, uint size_start, uint min_size, uint max_size,
+               uint size_offset, uint offset, uint enc, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_base(pos_start, size_start, min_size, max_size, DR_REG_Z0,
-                             DR_REG_Z31, offset, enc, pc, opnd);
+    return decode_sized_base(pos_start, size_start, min_size, max_size, size_offset,
+                             DR_REG_Z0, DR_REG_Z31, offset, enc, pc, opnd);
 }
 
 static inline bool
-encode_sized_z(uint pos_start, uint size_start, uint min_size, uint max_size, uint offset,
-               opnd_t opnd, OUT uint *enc_out)
+encode_sized_z(uint pos_start, uint size_start, uint min_size, uint max_size,
+               uint size_offset, uint offset, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_base(pos_start, size_start, min_size, max_size, OPSZ_SCALABLE,
-                             offset, true, opnd, enc_out);
+    return encode_sized_base(pos_start, size_start, min_size, max_size, size_offset,
+                             OPSZ_SCALABLE, offset, true, opnd, enc_out);
 }
 
 static inline bool
@@ -1694,7 +1729,7 @@ static inline bool
 decode_sized_p(uint pos_start, uint size_start, uint min_size, uint max_size, uint enc,
                byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_base(pos_start, size_start, min_size, max_size, DR_REG_P0,
+    return decode_sized_base(pos_start, size_start, min_size, max_size, 0, DR_REG_P0,
                              DR_REG_P15, 0, enc, pc, opnd);
 }
 
@@ -1702,7 +1737,7 @@ static inline bool
 encode_sized_p(uint pos_start, uint size_start, uint min_size, uint max_size, opnd_t opnd,
                OUT uint *enc_out)
 {
-    return encode_sized_base(pos_start, size_start, min_size, max_size,
+    return encode_sized_base(pos_start, size_start, min_size, max_size, 0,
                              OPSZ_SCALABLE_PRED, 0, true, opnd, enc_out);
 }
 
@@ -1871,7 +1906,8 @@ decode_opnd_h_const_sz(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 }
 
 static inline bool
-encode_opnd_h_const_sz(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+encode_opnd_h_const_sz(uint enc, int opcode, byte *pc, opnd_t opnd,
+                       OUT uint *enc_out)
 {
     if (!opnd_is_immed_int(opnd))
         return false;
@@ -2370,7 +2406,8 @@ static inline bool
 encode_float_const_pair(uint pos, float first, float second, opnd_t opnd,
                         OUT uint *enc_out)
 {
-    IF_RETURN_FALSE(!opnd_is_immed_float(opnd))
+    if (!opnd_is_immed_float(opnd))
+        return false;
 
     const float value = opnd_get_immed_float(opnd);
     IF_RETURN_FALSE((value != first) && (value != second))
@@ -2715,6 +2752,29 @@ static inline bool
 encode_opnd_simm5_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
     return encode_opnd_int(5, 5, true, 0, 0, opnd, enc_out);
+}
+
+/* imm1_ew_10: 1 bit symbolised imm, representing 90 or 270 */
+
+static inline bool
+decode_opnd_imm1_ew_10(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    const uint value = extract_uint(enc, 10, 1) == 0 ? 90 : 270;
+    *opnd = opnd_create_immed_uint(value, OPSZ_2);
+
+    return true;
+}
+
+static inline bool
+encode_opnd_imm1_ew_10(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    IF_RETURN_FALSE(!opnd_is_immed_int(opnd))
+
+    const uint value = opnd_get_immed_int(opnd);
+    IF_RETURN_FALSE((value != 90) && (value != 270))
+
+    *enc_out = (value == 90 ? 0 : 1) << 10;
+    return true;
 }
 
 /* simm6_5: Signed 6 bit immediate from 5-10 */
@@ -3110,6 +3170,20 @@ encode_opnd_p10_zer(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_o
     if (!opnd_is_predicate_zero(opnd))
         return false;
     return encode_opnd_p(10, 15, opnd, enc_out);
+}
+
+/* imm4_10: 4 bit immediate from 10:13 */
+
+static inline bool
+decode_opnd_imm4_10(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_opnd_int(10, 4, false /*signed*/, 0, OPSZ_4b, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_imm4_10(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_opnd_int(10, 4, false /*signed*/, 0, 0, opnd, enc_out);
 }
 
 /* cmode_s_sz: Operand for 32 bit elements' shift amount */
@@ -3512,6 +3586,30 @@ encode_opnd_imm13_const(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *e
     return true;
 }
 
+static inline bool
+decode_opnd_z_size17_hsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(0, 17, HALF_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_size17_hsd_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(0, 17, HALF_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_size17_hsd_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(5, 17, HALF_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_size17_hsd_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(5, 17, HALF_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
+}
+
 /* imm3: 3-bit immediate from bits 16-18 */
 
 static inline bool
@@ -3531,7 +3629,7 @@ encode_opnd_imm3(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 static inline bool
 decode_opnd_z3_b_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_single_sized(DR_REG_Z0, DR_REG_Z27, 16, 3, BYTE_REG, 0, enc, opnd);
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z7, 16, 3, BYTE_REG, 0, enc, opnd);
 }
 
 static inline bool
@@ -3548,7 +3646,7 @@ encode_opnd_z3_b_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_o
 static inline bool
 decode_opnd_z3_h_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_single_sized(DR_REG_Z0, DR_REG_Z27, 16, 3, HALF_REG, 0, enc, opnd);
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z7, 16, 3, HALF_REG, 0, enc, opnd);
 }
 
 static inline bool
@@ -3565,7 +3663,7 @@ encode_opnd_z3_h_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_o
 static inline bool
 decode_opnd_z3_s_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_single_sized(DR_REG_Z0, DR_REG_Z27, 16, 3, SINGLE_REG, 0, enc, opnd);
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z7, 16, 3, SINGLE_REG, 0, enc, opnd);
 }
 
 static inline bool
@@ -3808,6 +3906,23 @@ encode_opnd_imm4_16p1(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc
     return true;
 }
 
+/* z4_h_16: Z0-15 register with h size elements at position 16 */
+
+static inline bool
+decode_opnd_z4_h_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z15, 16, 4, HALF_REG, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_z4_h_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    const reg_id_t reg = opnd_get_reg(opnd);
+    IF_RETURN_FALSE((reg < DR_REG_Z0) || (reg > DR_REG_Z15))
+
+    return encode_single_sized(OPSZ_SCALABLE, 16, HALF_REG, 0, opnd, enc_out);
+}
+
 /* z4_s_16: Z0-15 register with s size elements at position 16 */
 
 static inline bool
@@ -3830,7 +3945,7 @@ encode_opnd_z4_s_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_o
 static inline bool
 decode_opnd_z4_d_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_single_sized(DR_REG_Z0, DR_REG_Z31, 16, 4, DOUBLE_REG, 0, enc, opnd);
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z15, 16, 4, DOUBLE_REG, 0, enc, opnd);
 }
 
 static inline bool
@@ -3994,7 +4109,7 @@ static inline bool
 encode_z_tsz_bhsdq_base(opnd_t opnd, uint pos, OUT uint *enc_out)
 {
 
-    return encode_sized_base(pos, 0, BYTE_REG, QUAD_REG, OPSZ_SCALABLE, 0, false, opnd,
+    return encode_sized_base(pos, 0, BYTE_REG, QUAD_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
                              enc_out);
 }
 
@@ -4045,7 +4160,7 @@ encode_opnd_wx5_imm5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_
 {
     if (!opnd_is_reg(opnd))
         ASSERT(false);
-    uint num;
+    uint num = 0;
     bool is_x;
     if (!encode_reg(&num, &is_x, opnd_get_reg(opnd), false))
         ASSERT(false);
@@ -4065,12 +4180,29 @@ decode_opnd_i1_index_20(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 static inline bool
 encode_opnd_i1_index_20(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    if (!opnd_is_immed_int(opnd)) {
-        RETURN_FALSE
-    }
+    IF_RETURN_FALSE(!opnd_is_immed_int(opnd));
 
     const uint value = (uint)opnd_get_immed_int(opnd);
     *enc_out = BITS(value, 0, 0) << 20;
+    return true;
+}
+
+static inline bool
+decode_opnd_i2_index_11(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    const uint i3h = extract_uint(enc, 20, 1) << 1;
+    const uint i3l = extract_uint(enc, 11, 1);
+    *opnd = opnd_create_immed_uint(i3h | i3l, OPSZ_1b);
+    return true;
+}
+
+static inline bool
+encode_opnd_i2_index_11(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    IF_RETURN_FALSE(!opnd_is_immed_int(opnd));
+
+    const uint value = (uint)opnd_get_immed_int(opnd);
+    *enc_out = (BITS(value, 1, 1) << 20) | (BITS(value, 0, 0) << 11);
     return true;
 }
 
@@ -4397,6 +4529,18 @@ encode_opnd_z_h_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_ou
     return encode_single_sized(OPSZ_SCALABLE, 16, HALF_REG, 0, opnd, enc_out);
 }
 
+static inline bool
+decode_opnd_z_s_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z31, 16, 5, SINGLE_REG, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_z_s_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_single_sized(OPSZ_SCALABLE, 16, SINGLE_REG, 0, opnd, enc_out);
+}
+
 /* z_q_16: Z register with d size elements. */
 
 static inline bool
@@ -4468,15 +4612,9 @@ encode_opnd_s16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 }
 
 static inline bool
-svemem_gprs_per_element_decode(uint bytes_per_element, aarch64_reg_offset element_size,
-                               uint shift_amount, uint enc, int opcode, byte *pc,
-                               OUT opnd_t *opnd)
+svemem_gprs_per_element_decode(opnd_size_t mem_transfer, uint shift_amount, uint enc,
+                               int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    ASSERT(element_size >= BYTE_REG && element_size <= DOUBLE_REG);
-
-    const uint elements = get_elements_in_sve_vector(element_size);
-    const opnd_size_t mem_transfer = opnd_size_from_bytes(bytes_per_element * elements);
-
     *opnd = opnd_create_base_disp_shift_aarch64(
         decode_reg(extract_uint(enc, 5, 5), true, true),
         decode_reg(extract_uint(enc, 16, 5), true, false), DR_EXTEND_UXTX,
@@ -4485,14 +4623,25 @@ svemem_gprs_per_element_decode(uint bytes_per_element, aarch64_reg_offset elemen
 }
 
 static inline bool
-svemem_gprs_per_element_encode(uint bytes_per_element, aarch64_reg_offset element_size,
-                               uint shift_amount, uint enc, int opcode, byte *pc,
-                               opnd_t opnd, OUT uint *enc_out)
+svemem_gprs_per_element_encode(opnd_size_t mem_transfer, uint shift_amount, uint enc,
+                               int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    ASSERT(element_size >= BYTE_REG && element_size <= DOUBLE_REG);
+    const uint index_reg = opnd_get_index(opnd);
 
-    const uint elements = get_elements_in_sve_vector(element_size);
-    const opnd_size_t mem_transfer = opnd_size_from_bytes(bytes_per_element * elements);
+    /* Only the first-fault loads allow Xm to be WZR. */
+    switch (opcode) {
+    case OP_ldff1b:
+    case OP_ldff1h:
+    case OP_ldff1w:
+    case OP_ldff1d:
+    case OP_ldff1sb:
+    case OP_ldff1sh:
+    case OP_ldff1sw: break;
+    default:
+        if (index_reg == DR_REG_WZR)
+            return false;
+        break;
+    }
 
     if (!opnd_is_base_disp(opnd) || opnd_get_size(opnd) != mem_transfer ||
         opnd_get_disp(opnd) != 0)
@@ -4513,18 +4662,6 @@ svemem_gprs_per_element_encode(uint bytes_per_element, aarch64_reg_offset elemen
 
     *enc_out = rn << 5 | rm << 16;
     return true;
-}
-
-static inline bool
-decode_opnd_svemem_gprs_b1(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
-{
-    return svemem_gprs_per_element_decode(1, BYTE_REG, 0, enc, opcode, pc, opnd);
-}
-
-static inline bool
-encode_opnd_svemem_gprs_b1(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
-{
-    return svemem_gprs_per_element_encode(1, BYTE_REG, 0, enc, opcode, pc, opnd, enc_out);
 }
 
 /* imm8_10: 8 bit imm at pos 10, split across 20:16 and 12:10. */
@@ -4563,10 +4700,8 @@ decode_svemem_gpr_vec(uint enc, aarch64_reg_offset element_size, dr_extend_type_
     const reg_id_t zm = decode_vreg(Z_REG, extract_uint(enc, 16, 5));
     ASSERT(reg_is_z(zm));
 
-    const uint num_elements = get_elements_in_sve_vector(element_size);
-    const opnd_size_t mem_size = is_prefetch
-        ? OPSZ_0
-        : opnd_size_from_bytes((1 << memory_access_size) * num_elements);
+    const opnd_size_t mem_size =
+        is_prefetch ? OPSZ_0 : opnd_size_from_bytes(1 << memory_access_size);
 
     *opnd = opnd_create_vector_base_disp_aarch64(
         xn, zm, get_opnd_size_from_offset(element_size), mod, scaled, 0, 0, mem_size,
@@ -4668,6 +4803,20 @@ encode_opnd_mem9off(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_o
     return encode_opnd_int(12, 9, true, 0, 0, opnd, enc_out);
 }
 
+/* mem9off_tag: Same as mem9off, but performs memory tag scaling */
+
+static inline bool
+decode_opnd_mem9off_tag(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_opnd_int(12, 9, true, log2_tag_granule, OPSZ_PTR, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_mem9off_tag(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_opnd_int(12, 9, true, log2_tag_granule, 0, opnd, enc_out);
+}
+
 /* mem9q: memory operand with 9-bit offset; size is 16 bytes */
 
 static inline bool
@@ -4680,6 +4829,37 @@ static inline bool
 encode_opnd_mem9q(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
     return encode_opnd_mem9_bytes(16, false, opnd, enc_out);
+}
+
+/* mem9_ldg_tag: Same as mem9_tag but fixed at offset with 0 bytes transferred */
+
+static inline bool
+decode_opnd_mem9_ldg_tag(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    const reg_id_t Xn = decode_reg(extract_uint(enc, 5, 5), true, true);
+    const uint disp = extract_int(enc, 12, 9) << log2_tag_granule;
+
+    *opnd = opnd_create_base_disp_aarch64(Xn, DR_REG_NULL, DR_EXTEND_UXTX, false, disp, 0,
+                                          OPSZ_0);
+    return true;
+}
+
+static inline bool
+encode_opnd_mem9_ldg_tag(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    uint xn;
+    if (!is_base_imm(opnd, &xn) || opnd_get_size(opnd) != OPSZ_0)
+        return false;
+
+    /* Disp must be multiple of 16 */
+    int disp = (int)opnd_get_disp(opnd);
+    IF_RETURN_FALSE((disp % (1 << log2_tag_granule)) != 0)
+
+    disp >>= log2_tag_granule;
+    IF_RETURN_FALSE(disp < -256 || disp > 255)
+
+    *enc_out = xn << 5 | (disp & 0x1ff) << 12;
+    return true;
 }
 
 /* prf9: prefetch variant of mem9 */
@@ -4976,6 +5156,21 @@ encode_opnd_vindex_H(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_
     return true;
 }
 
+/* imm6_16_tag: 6 bit immediate from 16:21 with tagged memory scaling */
+
+static inline bool
+decode_opnd_imm6_16_tag(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_opnd_int(16, 6, false /*signed*/, log2_tag_granule, OPSZ_10b, 0, enc,
+                           opnd);
+}
+
+static inline bool
+encode_opnd_imm6_16_tag(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_opnd_int(16, 6, false /*signed*/, log2_tag_granule, 0, opnd, enc_out);
+}
+
 /* svemem_gpr_simm6_vl: 6 bit signed immediate offset added to base register
  * defined in bits 5 to 9.
  */
@@ -4998,9 +5193,19 @@ static inline bool
 decode_opnd_svemem_gpr_simm6_vl(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
     const int offset = extract_int(enc, 16, 6);
+    IF_RETURN_FALSE(offset < -32 || offset > 31)
     const reg_id_t rn = decode_reg(extract_uint(enc, 5, 5), true, true);
-    const opnd_size_t mem_transfer = op_is_prefetch(opcode) ? OPSZ_0 : OPSZ_SVE_VL;
-    *opnd = opnd_create_base_disp(rn, DR_REG_NULL, 0, offset, mem_transfer);
+    const opnd_size_t mem_transfer = op_is_prefetch(opcode) ? OPSZ_0 : OPSZ_SVE_VL_BYTES;
+
+    /* As specified in the AArch64 SVE reference manual for contiguous prefetch
+     * instructions, the immediate index value is a vector index into memory, NOT
+     * an element or byte index. In DynamoRIO's IR, base-displacement operands
+     * should always refer to the address as a base register value + the linear
+     * memory displacement. So when creating the address operand here, it should be
+     * multiplied by the current vector register length in bytes.
+     */
+    int vl_bytes = dr_get_sve_vector_length() / 8;
+    *opnd = opnd_create_base_disp(rn, DR_REG_NULL, 0, offset * vl_bytes, mem_transfer);
 
     return true;
 }
@@ -5009,13 +5214,25 @@ static inline bool
 encode_opnd_svemem_gpr_simm6_vl(uint enc, int opcode, byte *pc, opnd_t opnd,
                                 OUT uint *enc_out)
 {
-    const opnd_size_t mem_transfer = op_is_prefetch(opcode) ? OPSZ_0 : OPSZ_SVE_VL;
+    const opnd_size_t mem_transfer = op_is_prefetch(opcode) ? OPSZ_0 : OPSZ_SVE_VL_BYTES;
     if (!opnd_is_base_disp(opnd) || opnd_get_index(opnd) != DR_REG_NULL ||
         opnd_get_size(opnd) != mem_transfer)
         return false;
+    if (!reg_is_gpr(opnd_get_base(opnd)))
+        return false;
+
+    /* As described in decode_opnd_svemem_gpr_simm6_vl(), disp is a multiple of
+     * vector length at the IR level, transformed to a vector index in the
+     * encoding.
+     */
+    int vl_bytes = dr_get_sve_vector_length() / 8;
+    if ((opnd_get_disp(opnd) % vl_bytes) != 0)
+        return false;
+    int disp = opnd_get_disp(opnd) / vl_bytes;
+    IF_RETURN_FALSE(disp < -32 || disp > 31)
 
     uint imm6;
-    if (!try_encode_int(&imm6, 6, 0, opnd_get_disp(opnd)))
+    if (!try_encode_int(&imm6, 6, 0, disp))
         return false;
 
     uint rn;
@@ -5122,10 +5339,27 @@ decode_opnd_svemem_gpr_simm9_vl(uint enc, int opcode, byte *pc, OUT opnd_t *opnd
 {
     uint simm9 = (extract_uint(enc, 16, 6) << 3) | extract_uint(enc, 10, 3);
     int offset9 = extract_int(simm9, 0, 9);
-    if (offset9 < -256 || offset9 > 255)
-        return false;
-    *opnd = opnd_create_base_disp(decode_reg(extract_uint(enc, 5, 5), true, true),
-                                  DR_REG_NULL, 0, offset9, OPSZ_SVE_VL);
+    IF_RETURN_FALSE(offset9 < -256 || offset9 > 255)
+
+    bool is_vector = TEST(1u << 14, enc);
+
+    /* Transfer size depends on whether we are transferring a Z or a P register. */
+    opnd_size_t memory_transfer_size = is_vector ? OPSZ_SVE_VL_BYTES : OPSZ_SVE_PL_BYTES;
+
+    /* As specified in the AArch64 SVE reference manual for unpredicated vector
+     * register load LDR and store STR instructions, the immediate index value is a
+     * vector index into memory, NOT an element or byte index. In DynamoRIO's IR,
+     * base-displacement operands should always refer to the address as a base
+     * register value + the linear memory displacement. So when creating the
+     * address operand here, it should be multiplied by the current vector or
+     * predicate register length in bytes.
+     */
+    int vl_bytes = dr_get_sve_vector_length() / 8;
+    int pl_bytes = vl_bytes / 8;
+    int mul_len = is_vector ? vl_bytes : pl_bytes;
+    *opnd =
+        opnd_create_base_disp(decode_reg(extract_uint(enc, 5, 5), true, true),
+                              DR_REG_NULL, 0, offset9 * mul_len, memory_transfer_size);
     return true;
 }
 
@@ -5136,15 +5370,49 @@ encode_opnd_svemem_gpr_simm9_vl(uint enc, int opcode, byte *pc, opnd_t opnd,
     int disp;
     bool is_x;
     uint rn;
-    if (!opnd_is_base_disp(opnd) || opnd_get_size(opnd) != OPSZ_SVE_VL)
+
+    bool is_vector = TEST(1u << 14, enc);
+
+    /* Transfer size depends on whether we are transferring a Z or a P register. */
+    opnd_size_t memory_transfer_size = is_vector ? OPSZ_SVE_VL_BYTES : OPSZ_SVE_PL_BYTES;
+
+    if (!opnd_is_base_disp(opnd) || opnd_get_size(opnd) != memory_transfer_size)
         return false;
-    disp = opnd_get_disp(opnd);
-    if (disp < -256 || disp > 255)
-        return false;
-    if (!encode_reg(&rn, &is_x, opnd_get_base(opnd), true) || !is_x)
-        return false;
+    /* As described in decode_opnd_svemem_gpr_simm9_vl(), disp is a multiple of
+     * vector or predicate length at the IR level, transformed to a vector or
+     * predicate index in the encoding.
+     */
+    int vl_bytes = dr_get_sve_vector_length() / 8;
+    int pl_bytes = vl_bytes / 8;
+    if (is_vector) {
+        if ((opnd_get_disp(opnd) % vl_bytes) != 0)
+            return false;
+    } else {
+        if ((opnd_get_disp(opnd) % pl_bytes) != 0)
+            return false;
+    }
+
+    disp =
+        is_vector ? (opnd_get_disp(opnd) / vl_bytes) : (opnd_get_disp(opnd) / pl_bytes);
+    IF_RETURN_FALSE(disp < -256 || disp > 255)
+    IF_RETURN_FALSE(!encode_reg(&rn, &is_x, opnd_get_base(opnd), true) || !is_x)
+
     *enc_out = (rn << 5) | (BITS(disp, 8, 3) << 16) | (BITS(disp, 2, 0) << 10);
     return true;
+}
+
+/* mem7off_tag: Same as mem7off, but performs memory tag scaling */
+
+static inline bool
+decode_opnd_mem7off_tag(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_opnd_int(15, 7, true, log2_tag_granule, OPSZ_PTR, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_mem7off_tag(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_opnd_int(15, 7, true, log2_tag_granule, 0, opnd, enc_out);
 }
 
 /* imm12: 12-bit immediate operand of ADD/SUB */
@@ -5190,8 +5458,7 @@ encode_opnd_prf12(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out
 }
 
 static inline bool
-decode_svemem_gpr_simm4_vl(uint enc, opnd_size_t transfer_size, int scale,
-                           OUT opnd_t *opnd)
+decode_svemem_gpr_simm4(uint enc, opnd_size_t transfer_size, int scale, OUT opnd_t *opnd)
 {
     const int offset = extract_int(enc, 16, 4) * scale;
     const reg_id_t rn = decode_reg(extract_uint(enc, 5, 5), true, true);
@@ -5202,8 +5469,8 @@ decode_svemem_gpr_simm4_vl(uint enc, opnd_size_t transfer_size, int scale,
 }
 
 static inline bool
-encode_svemem_gpr_simm4_vl(uint enc, opnd_size_t transfer_size, int scale, opnd_t opnd,
-                           OUT uint *enc_out)
+encode_svemem_gpr_simm4(uint enc, opnd_size_t transfer_size, int scale, opnd_t opnd,
+                        OUT uint *enc_out)
 {
     if (!opnd_is_base_disp(opnd) || opnd_get_size(opnd) != transfer_size ||
         opnd_get_index(opnd) != DR_REG_NULL)
@@ -5221,29 +5488,6 @@ encode_svemem_gpr_simm4_vl(uint enc, opnd_size_t transfer_size, int scale, opnd_
 
     *enc_out = (rn << 5) | (imm4 << 16);
     return true;
-}
-
-/* SVE memory operand [<Xn|SP>{, #<imm>, MUL VL}] multiple dest registers or nt */
-
-static inline bool
-decode_opnd_svemem_gpr_simm4_vl_xreg(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
-{
-    const uint register_count = BITS(enc, 22, 21) + 1;
-    const opnd_size_t transfer_size =
-        opnd_size_from_bytes((register_count * dr_get_sve_vl()) / 8);
-
-    return decode_svemem_gpr_simm4_vl(enc, transfer_size, register_count, opnd);
-}
-
-static inline bool
-encode_opnd_svemem_gpr_simm4_vl_xreg(uint enc, int opcode, byte *pc, opnd_t opnd,
-                                     OUT uint *enc_out)
-{
-    const uint register_count = BITS(enc, 22, 21) + 1;
-    const opnd_size_t transfer_size =
-        opnd_size_from_bytes((register_count * dr_get_sve_vl()) / 8);
-
-    return encode_svemem_gpr_simm4_vl(enc, transfer_size, register_count, opnd, enc_out);
 }
 
 /* hsd_immh_sz: The element size of a vector mediated by immh with possible values h, s
@@ -5369,7 +5613,8 @@ decode_opnd_hsd_immh_reg0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 }
 
 static inline bool
-encode_opnd_hsd_immh_reg0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+encode_opnd_hsd_immh_reg0(uint enc, int opcode, byte *pc, opnd_t opnd,
+                          OUT uint *enc_out)
 {
     return encode_hsd_immh_regx(0, enc, opcode, pc, opnd, enc_out);
 }
@@ -5689,6 +5934,86 @@ encode_opnd_i3_index_19(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *e
     return true;
 }
 
+static inline bool
+encode_tszl_size(opnd_t opnd, OUT uint *enc_out, uint size_offset)
+{
+    const aarch64_reg_offset size = get_vector_element_reg_offset(opnd);
+
+    uint highest_bit;
+    switch (size) {
+    case BYTE_REG: highest_bit = 0; break;
+    case HALF_REG: highest_bit = 1; break;
+    case SINGLE_REG: highest_bit = 2; break;
+    case DOUBLE_REG: highest_bit = 3; break;
+    default: return false;
+    }
+    ASSERT(size_offset <= highest_bit);
+    uint esize = 1 << (highest_bit - size_offset);
+
+    *enc_out |= (BITS(esize, 1, 0) << 19) | (BITS(esize, 2, 2) << 22);
+
+    return true;
+}
+
+static inline bool
+decode_opnd_z_tszl19_bhsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd);
+
+static inline bool
+decode_opnd_z_wtszl19_bhsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_opnd_z_tszl19_bhsd_0(enc, opcode, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_wtszl19_bhsd_0(uint enc, int opcode, byte *pc, opnd_t opnd,
+                             OUT uint *enc_out)
+{
+    if (!encode_sized_base(0, 0, BYTE_REG, DOUBLE_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
+                           enc_out))
+        return false;
+
+    return encode_tszl_size(opnd, enc_out, 0);
+}
+
+static inline aarch64_reg_offset
+extract_tsz_offset(uint enc, uint tszh_pos, uint tszl_pos)
+{
+    int offset;
+
+    ASSERT(tszh_pos < 30);
+    uint tsz = (extract_uint(enc, tszh_pos, 2) << 2) | extract_uint(enc, tszl_pos, 2);
+
+    if (!highest_bit_set(tsz, 0, 4, &offset))
+        return NOT_A_REG;
+
+    ASSERT(offset < 4);
+    return offset;
+}
+
+static inline bool
+decode_opnd_z_wtszl19p1_bhsd_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    aarch64_reg_offset offset = extract_tsz_offset(enc, 22, 19);
+    ASSERT(offset < DOUBLE_REG);
+    offset += 1;
+
+    if (offset < BYTE_REG || offset > DOUBLE_REG)
+        return false;
+
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z31, 5, 5, offset, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_z_wtszl19p1_bhsd_5(uint enc, int opcode, byte *pc, opnd_t opnd,
+                               OUT uint *enc_out)
+{
+    if (!encode_sized_base(5, 0, BYTE_REG, DOUBLE_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
+                           enc_out))
+        return false;
+
+    return encode_tszl_size(opnd, enc_out, 1);
+}
+
 /* wx_sz_16: W/X register (or WZR/XZR) with size indicated in bit 22 */
 
 static inline bool
@@ -5701,6 +6026,99 @@ static inline bool
 encode_opnd_wx_sz_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
     return encode_opnd_rn(false, 16, 22, opnd, enc_out);
+}
+
+static inline bool
+tszlo_imm3_decode(uint imm3_pos, uint tszl_pos, bool one_indexed, uint enc, int opcode,
+                  byte *pc, OUT opnd_t *opnd)
+{
+    uint tszlh = (BITS(enc, 22, 22) << 2) | (extract_uint(enc, tszl_pos, 2));
+    int highest_bit;
+    if (!highest_bit_set(tszlh, 0, 4, &highest_bit))
+        return false;
+
+    uint tsz_imm3 = (tszlh << 3) | extract_uint(enc, imm3_pos, 3);
+
+    opnd_size_t shift_size;
+    switch (highest_bit) {
+    case 0: shift_size = OPSZ_3b; break;
+    case 1: shift_size = OPSZ_4b; break;
+    case 2: shift_size = OPSZ_5b; break;
+    case 3: shift_size = OPSZ_6b; break;
+    default: ASSERT_NOT_REACHED(); shift_size = OPSZ_NA;
+    }
+
+    uint value;
+    uint esize = 1 << (highest_bit + 3);
+    if (one_indexed) {
+        value = 2 * esize - tsz_imm3;
+    } else {
+        value = tsz_imm3 - esize;
+    }
+
+    *opnd = opnd_create_immed_int(value, shift_size);
+
+    return true;
+}
+
+static inline bool
+tszlo_imm3_encode(uint imm3_pos, uint tszl_pos, bool one_indexed, uint enc, int opcode,
+                  byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+
+    if (!opnd_is_immed_int(opnd))
+        return false;
+
+    opnd_size_t shift_size = opnd_get_size(opnd);
+
+    uint highest_bit;
+    switch (shift_size) {
+    case OPSZ_3b: highest_bit = 0; break;
+    case OPSZ_4b: highest_bit = 1; break;
+    case OPSZ_5b: highest_bit = 2; break;
+    case OPSZ_6b: highest_bit = 3; break;
+    default: RETURN_FALSE;
+    }
+
+    uint value = opnd_get_immed_int(opnd);
+    uint esize = 1 << (highest_bit + 3);
+    uint tsz_imm3;
+    if (one_indexed) {
+        tsz_imm3 = 2 * esize - value;
+    } else {
+        tsz_imm3 = value + esize;
+    }
+
+    *enc_out = (BITS(tsz_imm3, 5, 5) << 22) | (BITS(tsz_imm3, 4, 3) << tszl_pos) |
+        (BITS(tsz_imm3, 2, 0) << imm3_pos);
+
+    return true;
+}
+
+static inline bool
+decode_opnd_tszl19lo_imm3_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return tszlo_imm3_decode(16, 19, false, enc, opcode, pc, opnd);
+}
+
+static inline bool
+encode_opnd_tszl19lo_imm3_16(uint enc, int opcode, byte *pc, opnd_t opnd,
+                             OUT uint *enc_out)
+{
+    return tszlo_imm3_encode(16, 19, false, enc, opcode, pc, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_tszl19lo_imm3_16p1(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return tszlo_imm3_decode(16, 19, true, enc, opcode, pc, opnd);
+}
+
+static inline bool
+encode_opnd_tszl19lo_imm3_16p1(uint enc, int opcode, byte *pc, opnd_t opnd,
+                               OUT uint *enc_out)
+{
+    return tszlo_imm3_encode(16, 19, true, enc, opcode, pc, opnd, enc_out);
 }
 
 /* mem_s_imm9_off: The offset part of memory address reg+offset mem_s_imm9 */
@@ -5733,26 +6151,26 @@ encode_opnd_mem_s_imm9_off(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint
 static inline bool
 decode_opnd_z_size21_hsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 21, HALF_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(0, 21, HALF_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size21_hsd_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(0, 21, HALF_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(0, 21, HALF_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_size21_bhsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 21, BYTE_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(0, 21, BYTE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size21_bhsd_0(uint enc, int opcode, byte *pc, opnd_t opnd,
                             OUT uint *enc_out)
 {
-    return encode_sized_z(0, 21, BYTE_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(0, 21, BYTE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 static inline bool
@@ -5899,21 +6317,6 @@ encode_opnd_wx_size_0_zr(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *
     return encode_wx_size_reg(false, 0, opnd, enc_out);
 }
 
-static inline aarch64_reg_offset
-extract_tsz_offset(uint enc, uint tszh_pos, uint tszl_pos)
-{
-    int offset;
-
-    ASSERT(tszh_pos < 30);
-    uint tsz = (extract_uint(enc, tszh_pos, 2) << 2) | extract_uint(enc, tszl_pos, 2);
-
-    if (!highest_bit_set(tsz, 0, 4, &offset))
-        return NOT_A_REG;
-
-    ASSERT(offset < 4);
-    return offset;
-}
-
 static inline bool
 decode_opnd_z_tszl8_bhsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
@@ -5928,7 +6331,7 @@ decode_opnd_z_tszl8_bhsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 static inline bool
 encode_opnd_z_tszl8_bhsd_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_base(0, 0, BYTE_REG, DOUBLE_REG, OPSZ_SCALABLE, 0, false, opnd,
+    return encode_sized_base(0, 0, BYTE_REG, DOUBLE_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
                              enc_out);
 }
 
@@ -5970,6 +6373,139 @@ static inline bool
 encode_opnd_z_tb_bhs_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
     return encode_sized_z_tb(5, BYTE_REG, SINGLE_REG, opnd, enc_out);
+}
+
+static inline bool
+decode_mem7_tag(uint enc, OUT opnd_t *opnd)
+{
+    // Post/Pre/None
+    const uint index_type = extract_uint(enc, 23, 2);
+    switch (index_type) {
+    case MEM_OP_INDEX_POST:
+    case MEM_OP_INDEX_NONE:
+    case MEM_OP_INDEX_PRE: break;
+    default: ASSERT_NOT_REACHED();
+    }
+
+    const reg_id_t Xn = decode_reg(extract_uint(enc, 5, 5), true, true);
+    // Disp is zero for post-indexed
+    const uint disp = index_type == MEM_OP_INDEX_POST
+        ? 0
+        : (extract_int(enc, 15, 7) << log2_tag_granule);
+
+    *opnd = opnd_create_base_disp_aarch64(Xn, DR_REG_NULL, DR_EXTEND_UXTX, false, disp, 0,
+                                          OPSZ_16);
+    if (index_type == MEM_OP_INDEX_PRE)
+        opnd->value.base_disp.pre_index = true;
+
+    return true;
+}
+
+static inline bool
+encode_mem7_base_tag(uint enc, opnd_t opnd, OUT enum mem_op_index_t *index_type_out,
+                     OUT uint *enc_out)
+{
+    uint xn;
+    if (!is_base_imm(opnd, &xn) || opnd_get_size(opnd) != OPSZ_16)
+        return false;
+
+    /* Check the indexed state matches the expected pre_index value */
+    const uint index_type = extract_uint(enc, 23, 2);
+    if ((index_type == MEM_OP_INDEX_POST || index_type == MEM_OP_INDEX_NONE) &&
+        opnd.value.base_disp.pre_index)
+        return false;
+    if (index_type == MEM_OP_INDEX_PRE && !opnd.value.base_disp.pre_index)
+        return false;
+
+    if (index_type_out)
+        *index_type_out = index_type;
+
+    *enc_out = xn << 5;
+    return true;
+}
+
+static inline bool
+decode_mem9_tag(uint enc, OUT opnd_t *opnd)
+{
+    // Post/Pre/None
+    const uint index_type = extract_uint(enc, 10, 2);
+    switch (index_type) {
+    case MEM_OP_INDEX_POST:
+    case MEM_OP_INDEX_NONE:
+    case MEM_OP_INDEX_PRE: break;
+    default: ASSERT_NOT_REACHED();
+    }
+
+    // Bytes to write
+    opnd_size_t bytes;
+    switch (extract_uint(enc, 22, 2)) {
+    case 0x1: bytes = OPSZ_16; break;
+    case 0x3: bytes = OPSZ_32; break;
+    default: bytes = OPSZ_0; break;
+    }
+
+    const reg_id_t Xn = decode_reg(extract_uint(enc, 5, 5), true, true);
+    // Disp is zero for post-indexed
+    const uint disp = index_type == MEM_OP_INDEX_POST
+        ? 0
+        : (extract_int(enc, 12, 9) << log2_tag_granule);
+
+    *opnd = opnd_create_base_disp_aarch64(Xn, DR_REG_NULL, DR_EXTEND_UXTX, false, disp, 0,
+                                          bytes);
+    if (index_type == MEM_OP_INDEX_PRE)
+        opnd->value.base_disp.pre_index = true;
+
+    return true;
+}
+
+static inline bool
+encode_mem9_base_tag(uint enc, opnd_t opnd, OUT enum mem_op_index_t *index_type_out,
+                     OUT uint *enc_out)
+{
+    /* Bytes to write */
+    opnd_size_t bytes;
+    switch (extract_uint(enc, 22, 2)) {
+    case 0x1: bytes = OPSZ_16; break;
+    case 0x3: bytes = OPSZ_32; break;
+    default: bytes = OPSZ_0; break;
+    }
+
+    uint xn;
+    if (!is_base_imm(opnd, &xn) || opnd_get_size(opnd) != bytes)
+        return false;
+
+    /* Check the indexed state matches the expected pre_index value */
+    const uint index_type = extract_uint(enc, 10, 2);
+    if ((index_type == MEM_OP_INDEX_POST || index_type == MEM_OP_INDEX_NONE) &&
+        opnd.value.base_disp.pre_index)
+        return false;
+    if (index_type == MEM_OP_INDEX_PRE && !opnd.value.base_disp.pre_index)
+        return false;
+
+    if (index_type_out)
+        *index_type_out = index_type;
+
+    *enc_out = xn << 5;
+    return true;
+}
+
+/* mem9post_tag: Same as mem9_tag but specifically post-indexed */
+
+static inline bool
+decode_opnd_mem9post_tag(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_mem9_tag(enc, opnd);
+}
+
+static inline bool
+encode_opnd_mem9post_tag(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    enum mem_op_index_t index_type;
+    const bool result = encode_mem9_base_tag(enc, opnd, &index_type, enc_out);
+
+    /* Operand only for post-index */
+    IF_RETURN_FALSE(result && (index_type != MEM_OP_INDEX_POST))
+    return result;
 }
 
 /* fpimm8_5: floating-point 8 bit imm at pos 5 */
@@ -6019,7 +6555,44 @@ static inline bool
 encode_opnd_z_tszl19_bhsd_0(uint enc, int opcode, byte *pc, opnd_t opnd,
                             OUT uint *enc_out)
 {
-    return encode_sized_base(0, 0, BYTE_REG, DOUBLE_REG, OPSZ_SCALABLE, 0, false, opnd,
+    return encode_sized_base(0, 0, BYTE_REG, DOUBLE_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
+                             enc_out);
+}
+
+static inline bool
+decode_opnd_z_tszl19_bhs_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    aarch64_reg_offset offset = extract_tsz_offset(enc, 22, 19);
+
+    if (offset < BYTE_REG || offset > SINGLE_REG)
+        return false;
+
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z31, 0, 5, offset, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_z_tszl19_bhs_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_base(0, 0, BYTE_REG, SINGLE_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
+                             enc_out);
+}
+
+static inline bool
+decode_opnd_z_tszl19p1_hsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    aarch64_reg_offset offset = extract_tsz_offset(enc, 22, 19) + 1;
+
+    if (offset < HALF_REG || offset > DOUBLE_REG)
+        return false;
+
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z31, 0, 5, offset, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_z_tszl19p1_hsd_0(uint enc, int opcode, byte *pc, opnd_t opnd,
+                             OUT uint *enc_out)
+{
+    return encode_sized_base(0, 0, HALF_REG, DOUBLE_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
                              enc_out);
 }
 
@@ -6038,7 +6611,44 @@ static inline bool
 encode_opnd_z_tszl19_bhsd_5(uint enc, int opcode, byte *pc, opnd_t opnd,
                             OUT uint *enc_out)
 {
-    return encode_sized_base(5, 0, BYTE_REG, DOUBLE_REG, OPSZ_SCALABLE, 0, false, opnd,
+    return encode_sized_base(5, 0, BYTE_REG, DOUBLE_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
+                             enc_out);
+}
+
+static inline bool
+decode_opnd_z_tszl19_bhs_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    aarch64_reg_offset offset = extract_tsz_offset(enc, 22, 19);
+
+    if (offset < BYTE_REG || offset > SINGLE_REG)
+        return false;
+
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z31, 5, 5, offset, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_z_tszl19_bhs_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_base(5, 0, BYTE_REG, SINGLE_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
+                             enc_out);
+}
+
+static inline bool
+decode_opnd_z_tszl19p1_hsd_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    aarch64_reg_offset offset = extract_tsz_offset(enc, 22, 19) + 1;
+
+    if (offset < HALF_REG || offset > DOUBLE_REG)
+        return false;
+
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z31, 5, 5, offset, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_z_tszl19p1_hsd_5(uint enc, int opcode, byte *pc, opnd_t opnd,
+                             OUT uint *enc_out)
+{
+    return encode_sized_base(5, 0, HALF_REG, DOUBLE_REG, 0, OPSZ_SCALABLE, 0, false, opnd,
                              enc_out);
 }
 
@@ -6138,35 +6748,79 @@ encode_opnd_svemem_vec_vec_idx(uint enc, int opcode, byte *pc, opnd_t opnd,
     return true;
 }
 
-/* fpimm13: floating-point immediate for scalar fmov */
+/* fpimm8_13: floating-point immediate for scalar fmov */
 
 static inline bool
 decode_opnd_fpimm8_13(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    uint a = extract_uint(enc, 20, 1);
-    uint b = extract_uint(enc, 19, 1);
-    uint c = extract_uint(enc, 18, 1);
-    uint defgh = extract_uint(enc, 13, 5);
-
-    if (extract_uint(enc, 22, 1) == 0) { /* 32 bits */
-        return decode_fpimm8_single(a, b, c, defgh, opnd);
-    } else { /* 64 bits */
-        return decode_fpimm8_double(a, b, c, defgh, opnd);
+    const uint size = extract_uint(enc, 22, 2);
+    const uint a = extract_uint(enc, 20, 1);
+    const uint b = extract_uint(enc, 19, 1);
+    const uint c = extract_uint(enc, 18, 1);
+    const uint defgh = extract_uint(enc, 13, 5);
+    switch (size) {
+    case 0b00: return decode_fpimm8_single(a, b, c, defgh, opnd);
+    case 0b01: return decode_fpimm8_double(a, b, c, defgh, opnd);
+    case 0b11: return decode_fpimm8_half(a, b, c, defgh, opnd);
+    default: ASSERT_NOT_REACHED();
     }
+
+    return false;
 }
 
 static inline bool
 encode_opnd_fpimm8_13(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    if (opnd_is_immed_float(opnd)) {
-        ASSERT(extract_uint(enc, 22, 1) == 0); /* 32 bit floating point */
-        return encode_fpimm8_single(opnd, 18, 13, enc_out);
-    } else if (opnd_is_immed_double(opnd)) {
-        ASSERT(extract_uint(enc, 22, 1) == 1); /* 64 bit floating point */
-        return encode_fpimm8_double(opnd, 18, 13, enc_out);
-    } else {
-        return false;
+    const uint size = extract_uint(enc, 22, 2);
+    switch (size) {
+    case 0b00: return encode_fpimm8_single(opnd, 18, 13, enc_out);
+    case 0b01: return encode_fpimm8_double(opnd, 18, 13, enc_out);
+    case 0b11: return encode_fpimm8_half(opnd, 18, 13, enc_out);
     }
+
+    return false;
+}
+
+static inline bool
+extract_memtag_disp(opnd_t opnd, enum mem_op_index_t index_type, OUT int *disp_out)
+{
+    /* Disp must be multiple of 16 and be zero for post-indexed */
+    int disp = opnd_get_disp(opnd);
+    IF_RETURN_FALSE((disp % (1 << log2_tag_granule)) != 0)
+    IF_RETURN_FALSE(index_type == MEM_OP_INDEX_POST && disp != 0)
+
+    disp >>= log2_tag_granule;
+    IF_RETURN_FALSE(disp < -256 || disp > 255)
+
+    if (disp_out)
+        *disp_out = disp;
+
+    return true;
+}
+
+/* mem9_tag: memory operand with written bytes in 23:22, post/pre/offset is in 11:10, with
+ * memory tag scaling
+ */
+
+static inline bool
+decode_opnd_mem9_tag(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_mem9_tag(enc, opnd);
+}
+
+static inline bool
+encode_opnd_mem9_tag(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    enum mem_op_index_t index_type;
+    if (!encode_mem9_base_tag(enc, opnd, &index_type, enc_out))
+        return false;
+
+    int disp;
+    if (!extract_memtag_disp(opnd, index_type, &disp))
+        return false;
+
+    *enc_out |= BITS((uint)disp, 8, 0) << 12;
+    return true;
 }
 
 /* b_sz: Vector element width for SIMD instructions. */
@@ -6398,6 +7052,18 @@ encode_opnd_p_size_bhs_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *
 }
 
 static inline bool
+decode_opnd_p_size_bh_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_p(0, 22, BYTE_REG, HALF_REG, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_p_size_bh_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_p(0, 22, BYTE_REG, HALF_REG, opnd, enc_out);
+}
+
+static inline bool
 decode_opnd_p_size_hsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
     return decode_sized_p(0, 22, HALF_REG, DOUBLE_REG, enc, pc, opnd);
@@ -6429,7 +7095,8 @@ decode_opnd_hsd_size_reg0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 }
 
 static inline bool
-encode_opnd_hsd_size_reg0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+encode_opnd_hsd_size_reg0(uint enc, int opcode, byte *pc, opnd_t opnd,
+                          OUT uint *enc_out)
 {
     return encode_hsd_size_regx(0, enc, opcode, pc, opnd, enc_out);
 }
@@ -6450,49 +7117,75 @@ encode_opnd_bhsd_size_reg0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint
 static inline bool
 decode_opnd_z_size_bhsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 22, BYTE_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(0, 22, BYTE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_bhsd_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(0, 22, BYTE_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(0, 22, BYTE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_size_bhs_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 22, BYTE_REG, SINGLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(0, 22, BYTE_REG, SINGLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_bhs_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(0, 22, BYTE_REG, SINGLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(0, 22, BYTE_REG, SINGLE_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_sizep1_bhs_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(0, 22, BYTE_REG, SINGLE_REG, 1, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_sizep1_bhs_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(0, 22, BYTE_REG, SINGLE_REG, 1, 0, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_size_hsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 22, HALF_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(0, 22, HALF_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_hsd_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(0, 22, HALF_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(0, 22, HALF_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_size_sd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 22, SINGLE_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(0, 22, SINGLE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_sd_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(0, 22, SINGLE_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(0, 22, SINGLE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_size_hd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(0, 22, HALF_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_size_hd_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    EXCLUDE_ELEMENT(SINGLE_REG);
+
+    return encode_sized_z(0, 22, HALF_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 static inline bool
@@ -6515,7 +7208,8 @@ decode_opnd_hsd_size_reg5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 }
 
 static inline bool
-encode_opnd_hsd_size_reg5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+encode_opnd_hsd_size_reg5(uint enc, int opcode, byte *pc, opnd_t opnd,
+                          OUT uint *enc_out)
 {
     return encode_hsd_size_regx(5, enc, opcode, pc, opnd, enc_out);
 }
@@ -6560,49 +7254,112 @@ encode_opnd_bhsd_size_reg5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint
 static inline bool
 decode_opnd_z_size_bhsd_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(5, 22, BYTE_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(5, 22, BYTE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_bhsd_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(5, 22, BYTE_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(5, 22, BYTE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_size_bhsd_5p1(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(5, 22, BYTE_REG, DOUBLE_REG, 0, 1, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_size_bhsd_5p1(uint enc, int opcode, byte *pc, opnd_t opnd,
+                            OUT uint *enc_out)
+{
+    return encode_sized_z(5, 22, BYTE_REG, DOUBLE_REG, 0, 1, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_size_bhs_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(5, 22, BYTE_REG, SINGLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(5, 22, BYTE_REG, SINGLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_bhs_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(5, 22, BYTE_REG, SINGLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(5, 22, BYTE_REG, SINGLE_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_size_bh_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(5, 22, BYTE_REG, HALF_REG, 0, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_size_bh_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(5, 22, BYTE_REG, HALF_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_sizep1_bhs_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(5, 22, BYTE_REG, SINGLE_REG, 1, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_sizep1_bhs_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(5, 22, BYTE_REG, SINGLE_REG, 1, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_sizep2_bh_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(5, 22, BYTE_REG, HALF_REG, 2, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_sizep2_bh_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(5, 22, BYTE_REG, HALF_REG, 2, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_sizep1_bs_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(5, 22, BYTE_REG, SINGLE_REG, 1, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_sizep1_bs_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    EXCLUDE_ELEMENT(HALF_REG);
+
+    return encode_sized_z(5, 22, BYTE_REG, SINGLE_REG, 1, 0, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_size_hsd_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(5, 22, HALF_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(5, 22, HALF_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_hsd_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(5, 22, HALF_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(5, 22, HALF_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_size_sd_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(5, 22, SINGLE_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(5, 22, SINGLE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_sd_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(5, 22, SINGLE_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(5, 22, SINGLE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 static inline bool
@@ -6753,7 +7510,8 @@ decode_opnd_hsd_size_reg16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 }
 
 static inline bool
-encode_opnd_hsd_size_reg16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+encode_opnd_hsd_size_reg16(uint enc, int opcode, byte *pc, opnd_t opnd,
+                           OUT uint *enc_out)
 {
     return encode_hsd_size_regx(16, enc, opcode, pc, opnd, enc_out);
 }
@@ -6787,25 +7545,88 @@ encode_opnd_p_size_bhsd_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint
 static inline bool
 decode_opnd_z_size_bhsd_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(16, 22, BYTE_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(16, 22, BYTE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_bhsd_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(16, 22, BYTE_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(16, 22, BYTE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_size_bh_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(16, 22, BYTE_REG, HALF_REG, 0, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_size_bh_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(16, 22, BYTE_REG, HALF_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_size_sd_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(16, 22, SINGLE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_size_sd_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(16, 22, SINGLE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_sizep1_bhs_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(16, 22, BYTE_REG, SINGLE_REG, 1, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_sizep1_bhs_16(uint enc, int opcode, byte *pc, opnd_t opnd,
+                            OUT uint *enc_out)
+{
+    return encode_sized_z(16, 22, BYTE_REG, SINGLE_REG, 1, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_sizep2_bh_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(16, 22, BYTE_REG, HALF_REG, 2, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_sizep2_bh_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(16, 22, BYTE_REG, HALF_REG, 2, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_sizep1_bs_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(16, 22, BYTE_REG, SINGLE_REG, 1, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_sizep1_bs_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    EXCLUDE_ELEMENT(HALF_REG);
+
+    return encode_sized_z(16, 22, BYTE_REG, SINGLE_REG, 1, 0, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_size_hsd_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(16, 22, HALF_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(16, 22, HALF_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_size_hsd_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(16, 22, HALF_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(16, 22, HALF_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 /* imm2_tsz_index: Index encoded in imm2:tsz */
@@ -6869,9 +7690,7 @@ decode_svemem_vec_imm5(uint enc, aarch64_reg_offset element_size, bool is_prefet
     const aarch64_reg_offset msz = BITS(enc, 24, 23);
     const uint scale = 1 << msz;
 
-    const opnd_size_t mem_transfer = is_prefetch
-        ? OPSZ_0
-        : opnd_size_from_bytes(scale * get_elements_in_sve_vector(element_size));
+    const opnd_size_t mem_transfer = is_prefetch ? OPSZ_0 : opnd_size_from_bytes(scale);
 
     const reg_id_t zn = decode_vreg(Z_REG, extract_uint(enc, 5, 5));
     ASSERT(reg_is_z(zn));
@@ -6915,9 +7734,7 @@ encode_svemem_vec_imm5(uint enc, aarch64_reg_offset element_size, bool is_prefet
     const aarch64_reg_offset msz = BITS(enc, 24, 23);
     const uint scale = 1 << msz;
 
-    const opnd_size_t mem_transfer = is_prefetch
-        ? OPSZ_0
-        : opnd_size_from_bytes(scale * get_elements_in_sve_vector(element_size));
+    const opnd_size_t mem_transfer = is_prefetch ? OPSZ_0 : opnd_size_from_bytes(scale);
 
     if (opnd_get_size(opnd) != mem_transfer)
         return false;
@@ -6929,6 +7746,25 @@ encode_svemem_vec_imm5(uint enc, aarch64_reg_offset element_size, bool is_prefet
     *enc_out |= (imm5 << 16) | (reg_number << 5);
 
     return true;
+}
+
+/* mem7post_tag: Same as mem7_tag but specifically post-indexed */
+
+static inline bool
+decode_opnd_mem7post_tag(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_mem7_tag(enc, opnd);
+}
+
+static inline bool
+encode_opnd_mem7post_tag(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    uint index_type;
+    const bool result = encode_mem7_base_tag(enc, opnd, &index_type, enc_out);
+
+    /* Operand only for post-index */
+    IF_RETURN_FALSE(result && (index_type != MEM_OP_INDEX_POST))
+    return result;
 }
 
 /* SVE memory address [<Zn>.S{, #<imm>}] */
@@ -6959,6 +7795,65 @@ encode_opnd_svemem_vec_d_imm5(uint enc, int opcode, byte *pc, opnd_t opnd,
     return encode_svemem_vec_imm5(enc, DOUBLE_REG, op_is_prefetch(opcode), opnd, enc_out);
 }
 
+/* sveprf_gpr_shf: SVE memory address [<Xn|SP>, <Xm>, LSL #x] for prefetch operations */
+
+static inline bool
+decode_opnd_sveprf_gpr_shf(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    const uint shift_amount = BITS(enc, 24, 23);
+
+    return svemem_gprs_per_element_decode(OPSZ_0, shift_amount, enc, opcode, pc, opnd);
+}
+
+static inline bool
+encode_opnd_sveprf_gpr_shf(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    const uint shift_amount = BITS(enc, 24, 23);
+
+    return svemem_gprs_per_element_encode(OPSZ_0, shift_amount, enc, opcode, pc, opnd,
+                                          enc_out);
+}
+
+/* sveprf_gpr_shf: SVE memory address [<Xn|SP>, <Xm>{, LSL #x}] */
+static inline bool
+decode_opnd_svemem_gpr_shf(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    const aarch64_reg_offset insz = BITS(enc, 24, 23);
+
+    return svemem_gprs_per_element_decode(opnd_size_from_bytes(1 << insz), insz, enc,
+                                          opcode, pc, opnd);
+}
+
+static inline bool
+encode_opnd_svemem_gpr_shf(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    const aarch64_reg_offset insz = BITS(enc, 24, 23);
+
+    return svemem_gprs_per_element_encode(opnd_size_from_bytes(1 << insz), insz, enc,
+                                          opcode, pc, opnd, enc_out);
+}
+
+/* sveprf_gpr_shf_signed: SVE memory address [<Xn|SP>, <Xm>{, LSL #x}] for signed load
+ * operations */
+static inline bool
+encode_opnd_svemem_gpr_shf_signed(uint enc, int opcode, byte *pc, opnd_t opnd,
+                                  OUT uint *enc_out)
+{
+    const aarch64_reg_offset insz = BITS(~enc, 24, 23);
+
+    return svemem_gprs_per_element_encode(opnd_size_from_bytes(1 << insz), insz, enc,
+                                          opcode, pc, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_svemem_gpr_shf_signed(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    const aarch64_reg_offset insz = BITS(~enc, 24, 23);
+
+    return svemem_gprs_per_element_decode(opnd_size_from_bytes(1 << insz), insz, enc,
+                                          opcode, pc, opnd);
+}
+
 /* SVE memory address (64-bit offset) [<Xn|SP>, <Zm>.D{, <mod>}] */
 static inline bool
 decode_opnd_svemem_gpr_vec64(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
@@ -6979,6 +7874,31 @@ encode_opnd_svemem_gpr_vec64(uint enc, int opcode, byte *pc, opnd_t opnd,
 
     return opnd_get_index_extend(opnd, NULL, NULL) == DR_EXTEND_UXTX &&
         encode_svemem_gpr_vec(enc, DOUBLE_REG, msz, scaled, opnd, enc_out);
+}
+
+/* mem7_tag: Write bytes is fixed at 16bytes, post/pre/offset is in 24:23, with memory tag
+ * scaling
+ */
+
+static inline bool
+decode_opnd_mem7_tag(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_mem7_tag(enc, opnd);
+}
+
+static inline bool
+encode_opnd_mem7_tag(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    enum mem_op_index_t index_type;
+    if (!encode_mem7_base_tag(enc, opnd, &index_type, enc_out))
+        return false;
+
+    int disp;
+    if (!extract_memtag_disp(opnd, index_type, &disp))
+        return false;
+
+    *enc_out |= BITS((uint)disp, 6, 0) << 15;
+    return true;
 }
 
 static inline bool
@@ -7013,14 +7933,95 @@ sizes_from_dtype(const uint enc, aarch64_reg_offset *insz, aarch64_reg_offset *e
         *elsz = BITS(dtype, 1, 0);
 }
 
-static inline opnd_size_t
-memory_transfer_size_from_dtype(uint enc)
+static inline bool
+decode_svemem_vec_sd_gpr16(uint size_bit, uint enc, int opcode, byte *pc,
+                           OUT opnd_t *opnd)
 {
-    aarch64_reg_offset insz, elsz;
-    sizes_from_dtype(enc, &insz, &elsz, true);
+    const aarch64_reg_offset msz = BITS(enc, 24, 23);
+    const uint scale = 1 << msz;
 
-    const uint elements = get_elements_in_sve_vector(elsz);
-    return opnd_size_from_bytes((1 << insz) * elements);
+    uint single_bit_value = 0;
+
+    if (size_bit == 22)
+        single_bit_value = 1;
+
+    const aarch64_reg_offset element_size =
+        BITS(enc, size_bit, size_bit) == single_bit_value ? SINGLE_REG : DOUBLE_REG;
+
+    const opnd_size_t mem_transfer = opnd_size_from_bytes(scale);
+
+    const reg_id_t zn = decode_vreg(Z_REG, extract_uint(enc, 5, 5));
+    ASSERT(reg_is_z(zn));
+
+    const reg_id_t xm = decode_reg(extract_uint(enc, 16, 5), true, false /* XZR */);
+    ASSERT(reg_is_gpr(xm));
+
+    *opnd = opnd_create_vector_base_disp_aarch64(
+        zn, xm, get_opnd_size_from_offset(element_size), DR_EXTEND_UXTX, false, 0, 0,
+        mem_transfer, 0);
+    return true;
+}
+
+static inline bool
+encode_svemem_vec_sd_gpr16(uint size_bit, uint enc, int opcode, byte *pc, opnd_t opnd,
+                           OUT uint *enc_out)
+{
+
+    uint single_bit_value = 0;
+
+    if (size_bit == 22)
+        single_bit_value = 1;
+
+    // Element size is a part of the constant bits
+    const aarch64_reg_offset element_size =
+        BITS(enc, size_bit, size_bit) == single_bit_value ? SINGLE_REG : DOUBLE_REG;
+
+    if (!opnd_is_base_disp(opnd) || opnd_get_index(opnd) == DR_REG_NULL ||
+        get_vector_element_reg_offset(opnd) != element_size)
+        return false;
+
+    bool index_scaled;
+    uint index_scale_amount;
+    if (opnd_get_index_extend(opnd, &index_scaled, &index_scale_amount) !=
+            DR_EXTEND_UXTX ||
+        index_scaled || index_scale_amount != 0)
+        return false;
+
+    uint zreg_number;
+    opnd_size_t reg_size = OPSZ_SCALABLE;
+    IF_RETURN_FALSE(!encode_vreg(&reg_size, &zreg_number, opnd_get_base(opnd)))
+
+    const aarch64_reg_offset msz = BITS(enc, 24, 23);
+    const uint scale = 1 << msz;
+
+    const opnd_size_t mem_transfer = opnd_size_from_bytes(scale);
+    IF_RETURN_FALSE(opnd_get_size(opnd) != mem_transfer)
+
+    uint xreg_number;
+    bool is_x = false;
+    IF_RETURN_FALSE(!encode_reg(&xreg_number, &is_x, opnd_get_index(opnd), false) ||
+                    !is_x)
+
+    *enc_out |= (xreg_number << 16) | (zreg_number << 5);
+    return true;
+}
+
+/*
+ * svemem_vec_sssd_gpr16: SVE memory address with GPR offset [<Zn>.S/D{, <Xm>}],
+ * size determined by bit 22
+ */
+
+static inline bool
+decode_opnd_svemem_vec_22sd_gpr16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_svemem_vec_sd_gpr16(22, enc, opcode, pc, opnd);
+}
+
+static inline bool
+encode_opnd_svemem_vec_22sd_gpr16(uint enc, int opcode, byte *pc, opnd_t opnd,
+                                  OUT uint *enc_out)
+{
+    return encode_svemem_vec_sd_gpr16(22, enc, opcode, pc, opnd, enc_out);
 }
 
 /* SVE memory operand [<Xn|SP>{, #<imm>, MUL VL}] 1 dest register */
@@ -7028,114 +8029,87 @@ memory_transfer_size_from_dtype(uint enc)
 static inline bool
 decode_opnd_svemem_gpr_simm4_vl_1reg(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_svemem_gpr_simm4_vl(enc, memory_transfer_size_from_dtype(enc), 1, opnd);
+    aarch64_reg_offset insz, elsz;
+    sizes_from_dtype(enc, &insz, &elsz, true);
+
+    const uint elements = get_elements_in_sve_vector(elsz);
+    const uint scale = (1 << insz) * elements;
+
+    const opnd_size_t transfer_size = opnd_size_from_bytes(1 << insz);
+    return decode_svemem_gpr_simm4(enc, transfer_size, scale, opnd);
 }
 
 static inline bool
 encode_opnd_svemem_gpr_simm4_vl_1reg(uint enc, int opcode, byte *pc, opnd_t opnd,
                                      OUT uint *enc_out)
 {
-    return encode_svemem_gpr_simm4_vl(enc, memory_transfer_size_from_dtype(enc), 1, opnd,
-                                      enc_out);
+    aarch64_reg_offset insz, elsz;
+    sizes_from_dtype(enc, &insz, &elsz, true);
+
+    const uint elements = get_elements_in_sve_vector(elsz);
+    const uint scale = (1 << insz) * elements;
+
+    const opnd_size_t transfer_size = opnd_size_from_bytes(1 << insz);
+    return encode_svemem_gpr_simm4(enc, transfer_size, scale, opnd, enc_out);
 }
 
+/* SVE memory operand [<Xn|SP>{, #<imm>, MUL VL}] multiple dest registers or nt */
+
 static inline bool
-decode_opnd_svemem_msz_gpr_shf(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+decode_opnd_svemem_gpr_simm4_vl_xreg(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    aarch64_reg_offset elsz, dests;
-    sizes_from_dtype(enc, &elsz, &dests, false);
+    const opnd_size_t element_size = get_opnd_size_from_offset(BITS(enc, 24, 23));
 
-    const uint shift_amount = elsz;
+    /* The offset is scaled by the size of the vector in memory.*/
+    const uint register_count = BITS(enc, 22, 21) + 1;
+    const uint scale = (register_count * dr_get_sve_vector_length()) / 8;
 
-    return svemem_gprs_per_element_decode((1 << elsz) * (dests + 1), elsz, shift_amount,
-                                          enc, opcode, pc, opnd);
+    return decode_svemem_gpr_simm4(enc, element_size, scale, opnd);
 }
 
 static inline bool
-encode_opnd_svemem_msz_gpr_shf(uint enc, int opcode, byte *pc, opnd_t opnd,
-                               OUT uint *enc_out)
+encode_opnd_svemem_gpr_simm4_vl_xreg(uint enc, int opcode, byte *pc, opnd_t opnd,
+                                     OUT uint *enc_out)
 {
-    aarch64_reg_offset elsz, dests;
-    sizes_from_dtype(enc, &elsz, &dests, false);
+    const opnd_size_t element_size = get_opnd_size_from_offset(BITS(enc, 24, 23));
 
-    const uint shift_amount = elsz;
+    /* The offset is scaled by the size of the vector in memory.*/
+    const uint register_count = BITS(enc, 22, 21) + 1;
+    const uint scale = (register_count * dr_get_sve_vector_length()) / 8;
 
-    return svemem_gprs_per_element_encode((1 << elsz) * (dests + 1), elsz, shift_amount,
-                                          enc, opcode, pc, opnd, enc_out);
+    return encode_svemem_gpr_simm4(enc, element_size, scale, opnd, enc_out);
 }
 
 static inline bool
-decode_opnd_svemem_msz_stgpr_shf(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+decode_ssz(uint enc, OUT uint *scale)
 {
-    aarch64_reg_offset elsz, dests;
-    sizes_from_dtype(enc, &elsz, &dests, false);
-    if (BITS(enc, 20, 16) == 0b11111)
-        return false;
+    switch (BITS(enc, 22, 21)) {
+    case 0b00: *scale = 16; return true;
+    case 0b01: *scale = 32; return true;
+    default: break;
+    }
+    return false;
+}
 
-    const uint shift_amount = elsz;
+/* svemem_gpr_simm4: SVE memory operand [<Xn|SP>{, #<imm>}] */
 
-    return svemem_gprs_per_element_decode((1 << elsz) * (dests + 1), elsz, shift_amount,
-                                          enc, opcode, pc, opnd);
+static inline bool
+decode_opnd_svemem_ssz_gpr_simm4(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    uint scale;
+    const opnd_size_t transfer_size = opnd_size_from_bytes(1 << BITS(enc, 24, 23));
+    return decode_ssz(enc, &scale) &&
+        decode_svemem_gpr_simm4(enc, transfer_size, scale, opnd);
 }
 
 static inline bool
-encode_opnd_svemem_msz_stgpr_shf(uint enc, int opcode, byte *pc, opnd_t opnd,
+encode_opnd_svemem_ssz_gpr_simm4(uint enc, int opcode, byte *pc, opnd_t opnd,
                                  OUT uint *enc_out)
 {
-    aarch64_reg_offset elsz, dests;
-    sizes_from_dtype(enc, &elsz, &dests, false);
-
-    const uint shift_amount = elsz;
-
-    bool success = svemem_gprs_per_element_encode(
-        (1 << elsz) * (dests + 1), elsz, shift_amount, enc, opcode, pc, opnd, enc_out);
-
-    if (BITS(enc, 20, 16) == 0b11111)
-        return false;
-    return success;
-}
-static inline bool
-decode_opnd_svemem_gpr_shf(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
-{
-    aarch64_reg_offset insz, elsz;
-    sizes_from_dtype(enc, &insz, &elsz, true);
-
-    const uint shift_amount = opnd_size_to_shift_amount(get_opnd_size_from_offset(insz));
-
-    return svemem_gprs_per_element_decode(1 << insz, elsz, shift_amount, enc, opcode, pc,
-                                          opnd);
-}
-
-static inline bool
-encode_opnd_svemem_gpr_shf(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
-{
-    aarch64_reg_offset insz, elsz;
-    sizes_from_dtype(enc, &insz, &elsz, true);
-
-    const uint shift_amount = opnd_size_to_shift_amount(get_opnd_size_from_offset(insz));
-
-    return svemem_gprs_per_element_encode(1 << insz, elsz, shift_amount, enc, opcode, pc,
-                                          opnd, enc_out);
-}
-
-static inline bool
-decode_opnd_svemem_gprs_bhsdx(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
-{
-    aarch64_reg_offset insz, elsz;
-    sizes_from_dtype(enc, &elsz, &insz, true);
-
-    return svemem_gprs_per_element_decode(insz + 1, elsz, 0, enc, opcode, pc, opnd);
-}
-
-static inline bool
-encode_opnd_svemem_gprs_bhsdx(uint enc, int opcode, byte *pc, opnd_t opnd,
-                              OUT uint *enc_out)
-{
-    aarch64_reg_offset insz, elsz;
-    sizes_from_dtype(enc, &elsz, &insz, true);
-
-    return svemem_gprs_per_element_encode(insz + 1, elsz, 0, enc, opcode, pc, opnd,
-                                          enc_out);
+    uint scale;
+    const opnd_size_t transfer_size = opnd_size_from_bytes(1 << BITS(enc, 24, 23));
+    return decode_ssz(enc, &scale) &&
+        encode_svemem_gpr_simm4(enc, transfer_size, scale, opnd, enc_out);
 }
 
 static inline bool
@@ -7183,49 +8157,155 @@ encode_opnd_svemem_gpr_vec32_st(uint enc, int opcode, byte *pc, opnd_t opnd,
 static inline bool
 decode_opnd_z_msz_bhsd_0(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, enc, pc, opnd);
+    return decode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_msz_bhsd_0(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, opnd, enc_out);
+    return encode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_msz_bhsd_0p1(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 1, enc, pc, opnd);
+    return decode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, 1, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_msz_bhsd_0p1(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 1, opnd, enc_out);
+    return encode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, 1, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_msz_bhsd_0p2(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 2, enc, pc, opnd);
+    return decode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, 2, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_msz_bhsd_0p2(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 2, opnd, enc_out);
+    return encode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, 2, opnd, enc_out);
 }
 
 static inline bool
 decode_opnd_z_msz_bhsd_0p3(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
-    return decode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 3, enc, pc, opnd);
+    return decode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, 3, enc, pc, opnd);
 }
 
 static inline bool
 encode_opnd_z_msz_bhsd_0p3(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
 {
-    return encode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 3, opnd, enc_out);
+    return encode_sized_z(0, 23, BYTE_REG, DOUBLE_REG, 0, 3, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z_msz_bhsd_5(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(5, 23, BYTE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_msz_bhsd_5(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(5, 23, BYTE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
+}
+
+static inline bool
+decode_opnd_z3_msz_bhsd_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    aarch64_reg_offset bit_size = extract_uint(enc, 23, 2);
+    if (bit_size < BYTE_REG)
+        return false;
+    if (bit_size > DOUBLE_REG)
+        return false;
+
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z7, 16, 3, bit_size, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_z3_msz_bhsd_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    IF_RETURN_FALSE(!opnd_is_element_vector_reg(opnd));
+
+    const aarch64_reg_offset size = get_vector_element_reg_offset(opnd);
+    if (size == NOT_A_REG)
+        return false;
+
+    if (size > DOUBLE_REG)
+        return false;
+    if (size < BYTE_REG)
+        return false;
+
+    opnd_size_t reg_size = OPSZ_SCALABLE;
+
+    uint reg_number;
+    if (!is_vreg(&reg_size, &reg_number, opnd))
+        return false;
+
+    if (reg_number > 7)
+        return false;
+
+    *enc_out |= (reg_number << 16);
+    *enc_out |= (size << 23);
+
+    return true;
+}
+
+static inline bool
+decode_opnd_z4_msz_bhsd_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    aarch64_reg_offset bit_size = extract_uint(enc, 23, 2);
+    if (bit_size < BYTE_REG)
+        return false;
+    if (bit_size > DOUBLE_REG)
+        return false;
+
+    return decode_single_sized(DR_REG_Z0, DR_REG_Z15, 16, 4, bit_size, 0, enc, opnd);
+}
+
+static inline bool
+encode_opnd_z4_msz_bhsd_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    IF_RETURN_FALSE(!opnd_is_element_vector_reg(opnd));
+
+    const aarch64_reg_offset size = get_vector_element_reg_offset(opnd);
+    if (size == NOT_A_REG)
+        return false;
+
+    if (size > DOUBLE_REG)
+        return false;
+    if (size < BYTE_REG)
+        return false;
+
+    opnd_size_t reg_size = OPSZ_SCALABLE;
+
+    uint reg_number;
+    if (!is_vreg(&reg_size, &reg_number, opnd))
+        return false;
+
+    if (reg_number > 15)
+        return false;
+
+    *enc_out |= (reg_number << 16);
+    *enc_out |= (size << 23);
+
+    return true;
+}
+
+static inline bool
+decode_opnd_z_msz_bhsd_16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_sized_z(16, 23, BYTE_REG, DOUBLE_REG, 0, 0, enc, pc, opnd);
+}
+
+static inline bool
+encode_opnd_z_msz_bhsd_16(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+{
+    return encode_sized_z(16, 23, BYTE_REG, DOUBLE_REG, 0, 0, opnd, enc_out);
 }
 
 /* mem0p: as mem0, but a pair of registers, so double size */
@@ -7274,6 +8354,21 @@ encode_opnd_x16imm(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_ou
         return true;
     }
     return false;
+}
+
+/* svemem_vec_sd_gpr16: SVE memory address with GPR offset [<Zn>.S/D{, <Xm>}] */
+
+static inline bool
+decode_opnd_svemem_vec_30sd_gpr16(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
+{
+    return decode_svemem_vec_sd_gpr16(30, enc, opcode, pc, opnd);
+}
+
+static inline bool
+encode_opnd_svemem_vec_30sd_gpr16(uint enc, int opcode, byte *pc, opnd_t opnd,
+                                  OUT uint *enc_out)
+{
+    return encode_svemem_vec_sd_gpr16(30, enc, opcode, pc, opnd, enc_out);
 }
 
 /* index3: index of D subreg in Q register: 0-1 */
@@ -7568,7 +8663,8 @@ decode_opnd_sd16_h_sz(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 }
 
 static inline bool
-encode_opnd_sd16_h_sz(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out)
+encode_opnd_sd16_h_sz(uint enc, int opcode, byte *pc, opnd_t opnd,
+                      OUT uint *enc_out)
 {
     uint num;
     bool d;
@@ -7750,7 +8846,8 @@ encode_opnd_mem12(uint enc, int opcode, byte *pc, opnd_t opnd, OUT uint *enc_out
     return encode_opnd_mem12_scale(extract_uint(enc, 30, 2), false, opnd, enc_out);
 }
 
-/* SVE prefetch memory address (32-bit offset) [<Xn|SP>, <Zm>.<T>, <mod>{ <amount>}] */
+/* SVE prefetch memory address (32-bit offset) [<Xn|SP>, <Zm>.<T>, <mod>{ <amount>}]
+ */
 static inline bool
 decode_opnd_sveprf_gpr_vec32(uint enc, int opcode, byte *pc, OUT opnd_t *opnd)
 {
@@ -8452,6 +9549,137 @@ encode_opnds_tbz(byte *pc, instr_t *instr, uint enc, decode_info_t *di)
     return ENCFAIL;
 }
 
+static inline uint
+decode_load_store_category(uint encoding)
+{
+    uint category = DR_INSTR_CATEGORY_OTHER;
+    /* Calculation of category is based on C4.1 'A64 instruction set encoding'
+     * of ARM V8 Architecture reference manual
+     *  https://developer.arm.com/documentation/ddi0487/
+     *  The encoding is:
+     *
+     *  31    28      26  24  23 22 21                      11 10                    0
+     * | x x x x | x | x x x | x x | x x x x x x | x x x x | x x | x x x x x x x x x x |
+     * -----------   ----  -----   ---------------         -------
+     *     op0        op1   op2          op3                 op4
+     *                        ------
+     *                         opc
+     */
+    uint op0 = BITS(encoding, 31, 28);
+    uint opc = BITS(encoding, 23, 22);
+    if ((op0 & 0x3) == 0x3) { /* xx11 */
+        if (BITS(encoding, 10, 10) == 1 && BITS(encoding, 21, 21) == 1)
+            category = DR_INSTR_CATEGORY_LOAD;
+        else if (opc == 0 || (opc == 0x2 && BITS(encoding, 26, 26) == 1))
+            category = DR_INSTR_CATEGORY_STORE;
+        else
+            category = DR_INSTR_CATEGORY_LOAD;
+    } else if ((op0 & 0x3) == 0 || (op0 & 0x3) == 0x2) { /* xx00, xx10 */
+        category = (BITS(encoding, 22, 22) == 0) ? DR_INSTR_CATEGORY_STORE
+                                                 : DR_INSTR_CATEGORY_LOAD;
+    } else { /* xx01 */
+        if (BITS(encoding, 24, 24) == 0)
+            category = DR_INSTR_CATEGORY_LOAD;
+        else if (BITS(encoding, 21, 21) == 0)
+            category = (opc == 0) ? DR_INSTR_CATEGORY_STORE : DR_INSTR_CATEGORY_LOAD;
+        else if ((opc == 0x1 || opc == 0x3) && BITS(encoding, 11, 10) == 0)
+            category = DR_INSTR_CATEGORY_LOAD;
+        else
+            category = DR_INSTR_CATEGORY_STORE;
+    }
+
+    /* Load/Store operation with SIMD&FP register */
+    if (category != DR_INSTR_CATEGORY_OTHER && BITS(encoding, 26, 26) == 1)
+        category |= DR_INSTR_CATEGORY_SIMD | DR_INSTR_CATEGORY_FP;
+
+    return category;
+}
+
+static inline void
+decode_category(uint encoding, instr_t *instr)
+{
+    int category = DR_INSTR_CATEGORY_OTHER;
+    /* Calculation of category is based on C4.1 'A64 instruction set encoding'
+     * of ARM V8 Architecture reference manual
+     *  The encoding is:
+     *
+     *   31  30 29 28    25 24                                             0
+     * | x | x  x |x x x x | x x x x x x x x x x x x x x x x x x x x x x x x |
+     *             --------
+     *               op1
+     */
+
+    uint op1 = BITS(encoding, 28, 25);
+    if ((BITS(encoding, 31, 31) == 1 && op1 == 0) || op1 == 0x2) /* SME || SVE */
+        category = DR_INSTR_CATEGORY_SIMD;
+    else if (BITS(encoding, 31, 31) == 0 && op1 == 0) /* op1 is 0 and 31 bit is 0 */
+        category = DR_INSTR_CATEGORY_UNCATEGORIZED;
+    else {
+        /*                       op1 - xxxx
+         *                              |
+         *                x0xx ------------------- x1xx
+         *                 |                         |
+         *          100x ----- 101x           x1x0 -------- x1x1
+         *          Int      Branches     Load/Store          |
+         *                                             x101 ----- x111
+         *                                             Int        Scalar Floating-Point
+         *                                                        and Advances SIMD
+         */
+        if ((op1 & 0x4) == 0) {       /* op1 is x0xx */
+            if ((op1 & 0x8) != 0) {   /* op1 is not 00xx */
+                if ((op1 & 0x2) == 0) /* op1 is 100x, Data processing Immediate */
+                    category = DR_INSTR_CATEGORY_MATH;
+                else /* op1 is 101x, Branches */
+                    category = DR_INSTR_CATEGORY_BRANCH;
+            }
+        } else { /* op1 is x1xx */
+            uint op0 = BITS(encoding, 31, 28);
+            if ((op1 & 0x1) == 0) /* op1 is x1x0, LOAD/STORE */
+                category = decode_load_store_category(encoding);
+            else if ((op1 & 0x2) == 0) /* op1 is x101 */
+                category = DR_INSTR_CATEGORY_MATH;
+            else { /* op1 is x111, Scalar Floating-Point and Advances SIMD */
+                /* op0 is 0xx0 || op0 is 01x1 */
+                if ((op0 & 0x9) == 0 || (op0 & 0x5) == 0x5)
+                    category = DR_INSTR_CATEGORY_SIMD;
+                else {
+                    category = DR_INSTR_CATEGORY_FP;
+                    if (op0 == 0xC) /* op0 is 1100 */
+                        category |= DR_INSTR_CATEGORY_MATH;
+                    else if ((op0 & 0x5) == 1) { /* op0 is x0x1 */
+                        if ((BITS(encoding, 24, 23) & 0x2) != 0)
+                            category |= DR_INSTR_CATEGORY_MATH;
+                        else {
+                            uint op2 = BITS(encoding, 22, 19);
+                            if ((op2 & 0x4) == 0) /* op2 is x0xx */
+                                category |= DR_INSTR_CATEGORY_CONVERT;
+                            else {
+                                uint op3 = BITS(encoding, 18, 10);
+                                if ((op3 & 0x3F) == 0) /* op3 is xxx000000 */
+                                    category |= DR_INSTR_CATEGORY_CONVERT;
+                                else if ((op3 & 0x10) == 0x10) /* op3 is xxxx10000 */
+                                    category |= DR_INSTR_CATEGORY_MATH;
+                                else if ((op3 & 0x8) == 0x8) /* op3 is xxxxx1000 */
+                                    category |= DR_INSTR_CATEGORY_MATH;
+                                else if ((op3 & 0x4) == 0x4) /* op3 is xxxxxx100 */
+                                    category |= DR_INSTR_CATEGORY_MOVE;
+                                else if ((op3 & 0x3) == 0x1) /* op3 is xxxxxxx01 */
+                                    category |= DR_INSTR_CATEGORY_MATH;
+                                else if ((op3 & 0x3) == 0x2) /* op3 is xxxxxxx10 */
+                                    category |= DR_INSTR_CATEGORY_MATH;
+                                else if ((op3 & 0x3) == 0x3) /* op3 is xxxxxxx11 */
+                                    category |= DR_INSTR_CATEGORY_MOVE;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    instr_set_category(instr, category);
+}
+
 /******************************************************************************/
 
 /* Include automatically generated decoder and encoder files. Decode and encode
@@ -8504,7 +9732,7 @@ decode_common(dcontext_t *dcontext, byte *pc, byte *orig_pc, instr_t *instr)
          */
         if ((enc & 0xfffff01f) == 0xd503201f) {
             SYSLOG_INTERNAL_WARNING("Undefined HINT instruction found: "
-                                    "encoding 0x%x (CRm:op2 0x%x)\n",
+                                    "encoding 0x%x (CRm:op2 0x%x)",
                                     enc, (enc & 0xfe0) >> 5);
             instr_set_opcode(instr, OP_nop);
             instr_set_num_opnds(dcontext, instr, 0, 0);
@@ -8530,6 +9758,8 @@ decode_common(dcontext_t *dcontext, byte *pc, byte *orig_pc, instr_t *instr)
             instr->dsts[3] = opnd_create_reg(DR_REG_X0 + (enc >> 16 & 31));
         }
     }
+
+    decode_category(enc, instr);
 
     /* XXX i#2374: This determination of flag usage should be separate from the
      * decoding of operands.
@@ -8586,10 +9816,5 @@ uint
 encode_common(byte *pc, instr_t *i, decode_info_t *di)
 {
     ASSERT(((ptr_int_t)pc & 3) == 0);
-
-#if defined(DR_HOST_NOT_TARGET) || defined(STANDALONE_DECODER)
-    dr_set_sve_vl(256);
-#endif
-
     return encoder_v80(pc, i, di);
 }

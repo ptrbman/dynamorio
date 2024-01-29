@@ -122,14 +122,20 @@ typedef struct {
 
 /* Label types. */
 typedef enum {
-    DRBBDUP_LABEL_START = 78, /* Denotes the start of a bb copy. */
-    DRBBDUP_LABEL_EXIT = 79,  /* Denotes the end of all bb copies. */
+    DRBBDUP_LABEL_START, /* Denotes the start of a bb copy. */
+    DRBBDUP_LABEL_EXIT,  /* Denotes the end of all bb copies. */
+    DRBBDUP_NOTE_COUNT,
 } drbbdup_label_t;
+
+static ptr_uint_t note_base;
+#define NOTE_VAL(enum_val) ((void *)(ptr_int_t)(note_base + (enum_val)))
 
 typedef struct {
     hashtable_t manager_table; /* Maps bbs with book-keeping data (for thread-private
                                   caches only). */
     int case_index; /* Used to keep track of the current case during insertion. */
+    bool inserted_restore_all;     /* Track if we need to restore regs at the end of the
+                                      block.  */
     void *orig_analysis_data;      /* Analysis data accessible for all cases. */
     void *default_analysis_data;   /* Analysis data specific to default case. */
     void **case_analysis_data;     /* Analysis data specific to cases. */
@@ -453,11 +459,11 @@ drbbdup_set_up_copies(void *drcontext, instrlist_t *bb, drbbdup_manager_t *manag
     /* Create an EXIT label. */
     instr_t *exit_label = INSTR_CREATE_label(drcontext);
     opnd_t exit_label_opnd = opnd_create_instr(exit_label);
-    instr_set_note(exit_label, (void *)(intptr_t)DRBBDUP_LABEL_EXIT);
+    instr_set_note(exit_label, NOTE_VAL(DRBBDUP_LABEL_EXIT));
 
     /* Prepend a START label. */
     instr_t *label = INSTR_CREATE_label(drcontext);
-    instr_set_note(label, (void *)(intptr_t)DRBBDUP_LABEL_START);
+    instr_set_note(label, NOTE_VAL(DRBBDUP_LABEL_START));
     instrlist_meta_preinsert(bb, instrlist_first(bb), label);
 
     /* Perform duplication. */
@@ -503,7 +509,7 @@ drbbdup_set_up_copies(void *drcontext, instrlist_t *bb, drbbdup_manager_t *manag
 
         /* Prepend a START label. */
         label = INSTR_CREATE_label(drcontext);
-        instr_set_note(label, (void *)(intptr_t)DRBBDUP_LABEL_START);
+        instr_set_note(label, NOTE_VAL(DRBBDUP_LABEL_START));
         instrlist_meta_preinsert(bb, instrlist_first(bb), label);
     }
 
@@ -630,9 +636,7 @@ drbbdup_is_at_label(instr_t *check_instr, drbbdup_label_t label)
         return false;
 
     /* Notes are inspected to check whether the label is relevant to drbbdup. */
-    drbbdup_label_t actual_label =
-        (drbbdup_label_t)(uintptr_t)instr_get_note(check_instr);
-    return actual_label == label;
+    return instr_get_note(check_instr) == NOTE_VAL(label);
 }
 
 /* Returns true if at the start of a bb version is reached. */
@@ -665,8 +669,9 @@ drbbdup_is_at_end(instr_t *check_instr)
 }
 
 /* Returns true if at the start of the end of a bb version: if check_instr is
- * the start emulation label for the inserted jump or the exit label.  If there
- * are no emulation labels this is equivalent to drbbdup_is_at_end().
+ * the start emulation label for the inserted jump or the exit label. This does not return
+ * true for certain types of blocks e.g., blocks that do not end in a branch/syscall or
+ * blocks that have unending emulation like repstr.
  */
 static bool
 drbbdup_is_at_end_initial(instr_t *check_instr)
@@ -757,14 +762,14 @@ drbbdup_next_end_initial(instr_t *instr)
  */
 static instrlist_t *
 drbbdup_extract_bb_copy(void *drcontext, instrlist_t *bb, instr_t *start,
-                        OUT instr_t **prev, OUT instr_t **post)
+                        DR_PARAM_OUT instr_t **prev, DR_PARAM_OUT instr_t **post)
 {
     instrlist_t *case_bb = instrlist_create(drcontext);
 
     ASSERT(start != NULL, "start instruction cannot be NULL");
     ASSERT(prev != NULL, "prev instr storage cannot be NULL");
     ASSERT(post != NULL, "post instr storage cannot be NULL");
-    ASSERT(instr_get_note(start) == (void *)DRBBDUP_LABEL_START,
+    ASSERT(instr_get_note(start) == NOTE_VAL(DRBBDUP_LABEL_START),
            "start instruction should be a START label");
 
     /* Use end_initial to avoid placing emulation markers in the list at all
@@ -843,8 +848,8 @@ static void *
 drbbdup_do_case_analysis(drbbdup_manager_t *manager, void *drcontext, void *tag,
                          instrlist_t *bb, instr_t *start, bool for_trace,
                          bool translating, const drbbdup_case_t *case_info,
-                         void *orig_analysis_data, OUT instr_t **next,
-                         INOUT dr_emit_flags_t *emit_flags)
+                         void *orig_analysis_data, DR_PARAM_OUT instr_t **next,
+                         DR_PARAM_INOUT dr_emit_flags_t *emit_flags)
 {
     if (opts.analyze_case == NULL && opts.analyze_case_ex == NULL)
         return NULL;
@@ -1385,9 +1390,13 @@ drbbdup_insert_dynamic_handling(void *drcontext, void *tag, instrlist_t *bb,
             instrlist_insert_mov_immed_ptrsz(drcontext, (ptr_int_t)tag, drbbdup_opnd, bb,
                                              where, NULL, NULL);
 
+#ifdef RISCV64
+            ASSERT(false, "NYI on RISCV64"); /* FIXME i#3544 */
+#else
             /* Jump if hit reaches zero. */
             instr = XINST_CREATE_jump_cond(drcontext, DR_PRED_EQ,
                                            opnd_create_pc(new_case_cache_pc));
+#endif
             instrlist_meta_preinsert(bb, where, instr);
 
         } else {
@@ -1507,6 +1516,7 @@ drbbdup_instrument_dups(void *drcontext, void *tag, instrlist_t *bb, instr_t *in
         ASSERT(end_instr != NULL, "end instruction cannot be NULL");
         instr_t *end_initial = drbbdup_next_end_initial(next_instr);
         ASSERT(end_initial != NULL, "end instruction cannot be NULL");
+        pt->inserted_restore_all = false;
 
         /* Cache first, first nonlabel and last instructions. */
         if (next_instr == end_initial) {
@@ -1590,10 +1600,15 @@ drbbdup_instrument_dups(void *drcontext, void *tag, instrlist_t *bb, instr_t *in
             }
         }
         drreg_restore_all(drcontext, bb, instr);
-    } else if (drbbdup_is_at_end(instr) && !is_last_special) {
-        drreg_restore_all(drcontext, bb, instr);
-    } else if (drbbdup_is_at_end(instr) || drbbdup_is_exit_jmp_emulation_marker(instr)) {
-        /* Ignore instruction: hide drbbdup's own markers and the rest of the end. */
+        pt->inserted_restore_all = true;
+    } else if (drbbdup_is_at_end(instr)) {
+        /* i#5906: if the emulation start label is missing we might still need to restore
+         * registers for blocks that don't end in a branch or for rep-expanded blocks. */
+        if (!pt->inserted_restore_all)
+            drreg_restore_all(drcontext, bb, instr);
+    } else if (drbbdup_is_exit_jmp_emulation_marker(instr)) {
+        /* Ignore instruction: hide drbbdup's own markers and the rest of the end.
+         * Do not call drreg_restore_all either. */
     } else if (pt->case_index == DRBBDUP_IGNORE_INDEX) {
         /* Ignore instruction. */
         ASSERT(drbbdup_is_special_instr(instr), "ignored instr should be cti or syscall");
@@ -1702,6 +1717,7 @@ drbbdup_link_phase(void *drcontext, void *tag, instrlist_t *bb, instr_t *instr,
     /* Start off with the default case index. */
     if (drmgr_is_first_instr(drcontext, instr)) {
         pt->case_index = DRBBDUP_DEFAULT_INDEX;
+        pt->inserted_restore_all = false;
     }
 
     if (is_thread_private) {
@@ -2030,7 +2046,7 @@ drbbdup_is_last_instr(void *drcontext, instr_t *instr, bool *is_last)
 }
 
 drbbdup_status_t
-drbbdup_get_stats(OUT drbbdup_stats_t *stats_in)
+drbbdup_get_stats(DR_PARAM_OUT drbbdup_stats_t *stats_in)
 {
     if (!opts.is_stat_enabled)
         return DRBBDUP_ERROR_UNSET_FEATURE;
@@ -2073,6 +2089,7 @@ drbbdup_thread_init(void *drcontext)
     }
 
     pt->case_index = 0;
+    pt->inserted_restore_all = false;
     pt->orig_analysis_data = NULL;
     if (opts.non_default_case_limit > 0) {
         pt->case_analysis_data =
@@ -2129,8 +2146,9 @@ drbbdup_thread_exit(void *drcontext)
  */
 
 static bool
-is_our_spill_or_restore(void *drcontext, instr_t *instr, bool *spill OUT,
-                        reg_id_t *reg_out OUT, uint *slot_out OUT, uint *offs_out OUT)
+is_our_spill_or_restore(void *drcontext, instr_t *instr, bool *spill DR_PARAM_OUT,
+                        reg_id_t *reg_out DR_PARAM_OUT, uint *slot_out DR_PARAM_OUT,
+                        uint *offs_out DR_PARAM_OUT)
 {
     bool tls;
     uint offs;
@@ -2409,6 +2427,11 @@ drbbdup_init(drbbdup_options_t *ops_in)
         if (stat_mutex == NULL)
             return DRBBDUP_ERROR;
     }
+
+    note_base = drmgr_reserve_note_range(DRBBDUP_NOTE_COUNT);
+    ASSERT(note_base != DRMGR_NOTE_NONE, "failed to reserve note range");
+    if (note_base == DRMGR_NOTE_NONE)
+        return DRBBDUP_ERROR;
 
     return DRBBDUP_SUCCESS;
 }

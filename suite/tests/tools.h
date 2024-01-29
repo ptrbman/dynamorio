@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2003-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -338,8 +338,13 @@ intercept_signal(int sig, handler_3_t handler, bool sigstack);
  * client-interface/call-retarget.c:main() being interpreted as a leaf
  * function that does not need the link register preserved.
  */
-#        define NOP_NOP_CALL(tgt) \
-            asm("nop\n nop\n bl " #tgt : : : IF_ARM_ELSE("lr", "x30"))
+#        ifdef MACOS
+#            define NOP_NOP_CALL(tgt) \
+                asm("nop\n nop\n bl _" #tgt : : : IF_ARM_ELSE("lr", "x30"))
+#        else
+#            define NOP_NOP_CALL(tgt) \
+                asm("nop\n nop\n bl " #tgt : : : IF_ARM_ELSE("lr", "x30"))
+#        endif
 #    endif
 #endif
 
@@ -567,9 +572,9 @@ static int
 NTFlush(char *buf, size_t len)
 {
     NTSTATUS status;
-    GET_NTDLL(
-        NtFlushInstructionCache,
-        (IN HANDLE ProcessHandle, IN PVOID BaseAddress OPTIONAL, IN SIZE_T FlushSize));
+    GET_NTDLL(NtFlushInstructionCache,
+              (DR_PARAM_IN HANDLE ProcessHandle, DR_PARAM_IN PVOID BaseAddress OPTIONAL,
+               DR_PARAM_IN SIZE_T FlushSize));
     status = NtFlushInstructionCache(GetCurrentProcess(), buf, len);
     if (!NT_SUCCESS(status)) {
         print("Error using NTFlush method\n");
@@ -632,9 +637,11 @@ get_process_mem_stats(HANDLE h, VM_COUNTERS *info)
     ULONG len = 0;
     /* could share w/ other process info routines... */
     GET_NTDLL(NtQueryInformationProcess,
-              (IN HANDLE ProcessHandle, IN PROCESSINFOCLASS ProcessInformationClass,
-               OUT PVOID ProcessInformation, IN ULONG ProcessInformationLength,
-               OUT PULONG ReturnLength OPTIONAL));
+              (DR_PARAM_IN HANDLE ProcessHandle,
+               DR_PARAM_IN PROCESSINFOCLASS ProcessInformationClass,
+               DR_PARAM_OUT PVOID ProcessInformation,
+               DR_PARAM_IN ULONG ProcessInformationLength,
+               DR_PARAM_OUT PULONG ReturnLength OPTIONAL));
     i = NtQueryInformationProcess((HANDLE)h, ProcessVmCounters, info, sizeof(VM_COUNTERS),
                                   &len);
     if (i != 0) {

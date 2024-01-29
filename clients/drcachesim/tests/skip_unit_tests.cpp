@@ -39,6 +39,14 @@
 #include <iostream>
 #include <memory>
 
+namespace dynamorio {
+namespace drmemtrace {
+
+using ::dynamorio::droption::droption_parser_t;
+using ::dynamorio::droption::DROPTION_SCOPE_ALL;
+using ::dynamorio::droption::DROPTION_SCOPE_FRONTEND;
+using ::dynamorio::droption::droption_t;
+
 #ifndef HAS_ZIP
 #    error zipfile reading is required for this test
 #endif
@@ -89,9 +97,8 @@ test_skip_initial()
         std::unique_ptr<reader_t> iter_end =
             std::unique_ptr<reader_t>(new zipfile_file_reader_t());
         // Run the tool.
-        std::unique_ptr<analysis_tool_t> tool =
-            std::unique_ptr<analysis_tool_t>(view_tool_create(
-                "", /*thread=*/0, /*skip_refs=*/0, /*sim_refs=*/view_count, "att"));
+        std::unique_ptr<analysis_tool_t> tool = std::unique_ptr<analysis_tool_t>(
+            view_tool_create("", /*skip_refs=*/0, /*sim_refs=*/view_count, "att"));
         std::string error = tool->initialize_stream(iter.get());
         CHECK(error.empty(), error.c_str());
         iter->skip_instructions(skip_instrs);
@@ -154,7 +161,7 @@ test_skip_initial()
 }
 
 int
-main(int argc, const char *argv[])
+test_main(int argc, const char *argv[])
 {
     std::string parse_err;
     if (!droption_parser_t::parse_argv(DROPTION_SCOPE_FRONTEND, argc, (const char **)argv,
@@ -170,3 +177,6 @@ main(int argc, const char *argv[])
     fprintf(stderr, "Success\n");
     return 0;
 }
+
+} // namespace drmemtrace
+} // namespace dynamorio

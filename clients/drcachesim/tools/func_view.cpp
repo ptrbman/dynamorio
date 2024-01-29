@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2020 Google, Inc.  All rights reserved.
+ * Copyright (c) 2020-2024 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -35,13 +35,31 @@
  * to qualify function names for offline traces.
  */
 
-#include "dr_api.h"
 #include "func_view.h"
+
+#include <assert.h>
+#include <stdint.h>
+
 #include <algorithm>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
+#include <mutex>
+#include <set>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
 #include <vector>
-#include <assert.h>
+
+#include "analysis_tool.h"
+#include "memref.h"
+#include "raw2trace_directory.h"
+#include "trace_entry.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 const std::string func_view_t::TOOL_NAME = "Function view tool";
 
@@ -61,8 +79,19 @@ func_view_t::func_view_t(const std::string &funclist_file_path, bool full_trace,
 }
 
 std::string
-func_view_t::initialize()
+func_view_t::initialize_shard_type(shard_type_t shard_type)
 {
+    if (shard_type == SHARD_BY_CORE) {
+        // We track state that is inherently tied to threads.
+        return "func_view tool does not support sharding by core";
+    }
+    return "";
+}
+
+std::string
+func_view_t::initialize_stream(memtrace_stream_t *serial_stream)
+{
+    serial_stream_ = serial_stream;
     std::vector<std::vector<std::string>> entries;
     raw2trace_directory_t directory_;
     std::string error =
@@ -105,10 +134,12 @@ func_view_t::parallel_shard_supported()
 }
 
 void *
-func_view_t::parallel_shard_init(int shard_index, void *worker_data)
+func_view_t::parallel_shard_init_stream(int shard_index, void *worker_data,
+                                        memtrace_stream_t *stream)
 {
     auto shard_data = new shard_data_t;
     std::lock_guard<std::mutex> guard(shard_map_mutex_);
+    shard_data->tid = stream->get_tid();
     shard_map_[shard_index] = shard_data;
     return shard_data;
 }
@@ -135,6 +166,12 @@ func_view_t::process_memref_for_markers(void *shard_data, const memref_t &memref
         shard->prev_pc = memref.instr.addr;
     if (memref.marker.type != TRACE_TYPE_MARKER)
         return;
+    if (memref.marker.marker_type == TRACE_MARKER_TYPE_FUNC_ID) {
+        shard->last_was_syscall = memref.marker.marker_value >=
+            static_cast<int64_t>(func_trace_t::TRACE_FUNC_ID_SYSCALL_BASE);
+    }
+    if (shard->last_was_syscall)
+        return;
     switch (memref.marker.marker_type) {
     case TRACE_MARKER_TYPE_FUNC_ID:
         if (shard->last_func_id != -1)
@@ -157,8 +194,6 @@ bool
 func_view_t::parallel_shard_memref(void *shard_data, const memref_t &memref)
 {
     shard_data_t *shard = reinterpret_cast<shard_data_t *>(shard_data);
-    if (memref.data.type == TRACE_TYPE_THREAD_EXIT)
-        shard->tid = memref.exit.tid;
     if (memref.marker.type != TRACE_TYPE_MARKER)
         return true;
     process_memref_for_markers(shard, memref);
@@ -169,10 +204,11 @@ bool
 func_view_t::process_memref(const memref_t &memref)
 {
     shard_data_t *shard;
-    const auto &lookup = shard_map_.find(memref.data.tid);
+    int shard_index = serial_stream_->get_shard_index();
+    const auto &lookup = shard_map_.find(shard_index);
     if (lookup == shard_map_.end()) {
         shard = new shard_data_t;
-        shard_map_[memref.data.tid] = shard;
+        shard_map_[shard_index] = shard;
     } else
         shard = lookup->second;
     process_memref_for_markers(shard, memref);
@@ -184,7 +220,7 @@ func_view_t::process_memref(const memref_t &memref)
         else
             std::cerr << ") <no return>\n";
     }
-    if (memref.marker.type != TRACE_TYPE_MARKER)
+    if (memref.marker.type != TRACE_TYPE_MARKER || shard->last_was_syscall)
         return true;
     switch (memref.marker.marker_type) {
     case TRACE_MARKER_TYPE_FUNC_RETADDR: {
@@ -298,3 +334,6 @@ func_view_t::print_results()
     // XXX: Should we print out a per-thread breakdown?
     return true;
 }
+
+} // namespace drmemtrace
+} // namespace dynamorio

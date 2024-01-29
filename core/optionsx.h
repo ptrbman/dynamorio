@@ -229,6 +229,7 @@ OPTION_INTERNAL(bool, tracedump_origins, "write out original instructions for ea
 OPTION(bool, syntax_intel, "use Intel disassembly syntax")
 OPTION(bool, syntax_att, "use AT&T disassembly syntax")
 OPTION(bool, syntax_arm, "use ARM (32-bit) disassembly syntax")
+OPTION(bool, syntax_riscv, "use RISC-V disassembly syntax")
 /* TODO i#4382: Add syntax_aarch64. */
 /* whether to mark gray-area instrs as invalid when we know the length (i#1118) */
 OPTION(bool, decode_strict, "mark all known-invalid instructions as invalid")
@@ -520,7 +521,8 @@ OPTION_COMMAND(
     },
     "enable memory savings at potential loss in performance", STATIC, OP_PCACHE_NOP)
 
-PC_OPTION_DEFAULT_INTERNAL(bool, bb_prefixes, IF_AARCH64_ELSE(true, false),
+PC_OPTION_DEFAULT_INTERNAL(bool, bb_prefixes,
+                           IF_AARCH64_ELSE(true, IF_RISCV64_ELSE(true, false)),
                            "give all bbs a prefix")
 /* If a client registers a bb hook, we force a full decode.  This option
  * requests a full decode regardless of whether there is a bb hook.
@@ -631,7 +633,7 @@ OPTION_DEFAULT_INTERNAL(bool, unsafe_build_ldstex, false,
                         "replace blocks using exclusive load/store with a "
                         "macro-instruction (unsafe)")
 #endif
-#ifdef AARCHXX
+#if defined(AARCHXX) || defined(RISCV64)
 /* TODO i#1698: ARM is still missing the abilty to convert the following:
  * + ldrexd..strexd.
  * + Predicated exclusive loads or stores.
@@ -641,7 +643,10 @@ OPTION_DEFAULT_INTERNAL(bool, ldstex2cas, true,
                         "replace exclusive load/store with compare-and-swap to "
                         "allow instrumentation, at the risk of ABA errors")
 #endif
-
+#ifdef RISCV64
+/* We only allow register between x18 and x31 to be used. */
+OPTION_DEFAULT_INTERNAL(uint, steal_reg, 28, "The register stolen/used by DynamoRIO")
+#endif
 #ifdef WINDOWS_PC_SAMPLE
 OPTION_DEFAULT(uint, prof_pcs_DR, 2,
                "PC profile dynamorio.dll, value is bit shift to use, < 2 or > 32 "
@@ -918,8 +923,11 @@ OPTION_DEFAULT(bool, elide_back_calls, true,
 OPTION_DEFAULT(uint, selfmod_max_writes, 5, "maximum write instrs per selfmod fragment")
 /* If this is too large, clients with heavyweight instrumentation hit the
  * "exceeded maximum size" failure.
+ * On RISC-V, direct branch has a range of +/- 4 KiB -- for extreme use cases, such as
+ * putting a clean call before every app instruction, 15 is a safe value to use.
  */
-OPTION_DEFAULT(uint, max_bb_instrs, 256, "maximum instrs per basic block")
+OPTION_DEFAULT(uint, max_bb_instrs, IF_RISCV64_ELSE(15, 256),
+               "maximum instrs per basic block")
 PC_OPTION_DEFAULT(bool, process_SEH_push, IF_RETURN_AFTER_CALL_ELSE(true, false),
                   "break bb's at an SEH push so we can see the frame pushed on in "
                   "interp, required for -borland_SEH_rct")

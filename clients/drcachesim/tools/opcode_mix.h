@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2018-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2018-2024 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -33,13 +33,23 @@
 #ifndef _OPCODE_MIX_H_
 #define _OPCODE_MIX_H_ 1
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 
+#include "dr_api.h" // Must be before trace_entry.h from analysis_tool.h.
 #include "analysis_tool.h"
+#include "memref.h"
 #include "raw2trace.h"
 #include "raw2trace_directory.h"
+#include "trace_entry.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 class opcode_mix_t : public analysis_tool_t {
 public:
@@ -91,8 +101,8 @@ protected:
         {
         }
         worker_data_t *worker;
-        int_least64_t instr_count;
-        std::unordered_map<int, int_least64_t> opcode_counts;
+        int64_t instr_count;
+        std::unordered_map<int, int64_t> opcode_counts;
         std::string error;
         app_pc last_trace_module_start;
         size_t last_trace_module_size;
@@ -125,7 +135,7 @@ protected:
     // must match ours.
     raw2trace_directory_t directory_;
 
-    std::unordered_map<memref_tid_t, shard_data_t *> shard_map_;
+    std::unordered_map<int, shard_data_t *> shard_map_;
     // This mutex is only needed in parallel_shard_init.  In all other accesses to
     // shard_map (process_memref, print_results) we are single-threaded.
     std::mutex shard_map_mutex_;
@@ -136,5 +146,8 @@ protected:
     worker_data_t serial_worker_;
     shard_data_t serial_shard_;
 };
+
+} // namespace drmemtrace
+} // namespace dynamorio
 
 #endif /* _OPCODE_MIX_H_ */

@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2015-2020 Google, Inc.  All rights reserved.
+ * Copyright (c) 2015-2023 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -31,10 +31,25 @@
  */
 
 #include "snoop_filter.h"
-#include <iostream>
-#include <iomanip>
+
 #include <assert.h>
+#include <stdint.h>
+
 #include <algorithm>
+#include <iomanip>
+#include <iostream>
+#include <locale>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "cache.h"
+#include "caching_device_block.h"
+#include "caching_device_stats.h"
+#include "trace_entry.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 snoop_filter_t::snoop_filter_t(void)
 {
@@ -135,3 +150,6 @@ snoop_filter_t::print_stats(void)
               << std::right << num_writebacks_ << std::endl;
     std::cerr.imbue(std::locale("C")); // Reset to avoid affecting later prints.
 }
+
+} // namespace drmemtrace
+} // namespace dynamorio

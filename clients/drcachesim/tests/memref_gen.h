@@ -33,10 +33,44 @@
 #ifndef _MEMREF_GEN_
 #define _MEMREF_GEN_ 1
 
-#include "../common/memref.h"
+#include "memref.h"
+#include "dr_api.h"
+#include <assert.h>
 #include <cstring>
+#include <vector>
 
-namespace {
+namespace dynamorio {
+namespace drmemtrace {
+
+#ifdef X86
+#    define REG1 DR_REG_XAX
+#    define REG2 DR_REG_XDX
+#elif defined(AARCHXX)
+#    define REG1 DR_REG_R0
+#    define REG2 DR_REG_R1
+#elif defined(RISCV64)
+#    define REG1 DR_REG_A0
+#    define REG2 DR_REG_A1
+#else
+#    error Unsupported arch
+#endif
+
+struct memref_with_IR_t {
+    memref_t memref;
+    instr_t *instr; // This is an instr created with DR IR APIs and is set only
+                    // for instrs created as such.
+};
+
+inline memref_t
+gen_addr(memref_tid_t tid, trace_type_t type, addr_t addr, size_t size = 1)
+{
+    memref_t memref = {};
+    memref.instr.type = type;
+    memref.instr.tid = tid;
+    memref.instr.addr = addr;
+    memref.instr.size = size;
+    return memref;
+}
 
 inline memref_t
 gen_data(memref_tid_t tid, bool load, addr_t addr, size_t size)
@@ -50,31 +84,42 @@ gen_data(memref_tid_t tid, bool load, addr_t addr, size_t size)
 }
 
 inline memref_t
-gen_instr_type(trace_type_t type, memref_tid_t tid, addr_t pc, size_t size = 1)
+gen_instr_type(trace_type_t type, memref_tid_t tid, addr_t pc = 1, size_t size = 1,
+               addr_t indirect_branch_target = 0)
 {
     memref_t memref = {};
     memref.instr.type = type;
     memref.instr.tid = tid;
     memref.instr.addr = pc;
     memref.instr.size = size;
+    memref.instr.indirect_branch_target = indirect_branch_target;
     return memref;
 }
 
 inline memref_t
-gen_instr(memref_tid_t tid, addr_t pc, size_t size = 1)
+gen_instr(memref_tid_t tid, addr_t pc = 1, size_t size = 1)
 {
     return gen_instr_type(TRACE_TYPE_INSTR, tid, pc, size);
 }
 
 inline memref_t
-gen_branch(memref_tid_t tid, addr_t pc)
+gen_branch(memref_tid_t tid, addr_t pc = 1)
 {
-    return gen_instr_type(TRACE_TYPE_INSTR_CONDITIONAL_JUMP, tid, pc);
+    return gen_instr_type(TRACE_TYPE_INSTR_UNTAKEN_JUMP, tid, pc);
 }
 
 // We use these client defines which are the target and so drdecode's target arch.
 #if defined(ARM_64) || defined(ARM_32)
 // Variant for aarchxx encodings.
+inline memref_t
+gen_instr_encoded(addr_t pc, int encoding, memref_tid_t tid = 1)
+{
+    memref_t memref = gen_instr_type(TRACE_TYPE_INSTR, tid, pc, 4);
+    memcpy(memref.instr.encoding, &encoding, sizeof(encoding));
+    memref.instr.encoding_is_new = true;
+    return memref;
+}
+
 inline memref_t
 gen_branch_encoded(memref_tid_t tid, addr_t pc, int encoding)
 {
@@ -84,7 +129,17 @@ gen_branch_encoded(memref_tid_t tid, addr_t pc, int encoding)
     memref.instr.encoding_is_new = true;
     return memref;
 }
+
 #elif defined(X86_64) || defined(X86_32)
+inline memref_t
+gen_instr_encoded(addr_t pc, const std::vector<char> &encoding, memref_tid_t tid = 1)
+{
+    memref_t memref = gen_instr_type(TRACE_TYPE_INSTR, tid, pc, encoding.size());
+    memcpy(memref.instr.encoding, encoding.data(), encoding.size());
+    memref.instr.encoding_is_new = true;
+    return memref;
+}
+
 // Variant for x86 encodings.
 inline memref_t
 gen_branch_encoded(memref_tid_t tid, addr_t pc, const std::vector<char> &encoding)
@@ -118,6 +173,49 @@ gen_exit(memref_tid_t tid)
     return memref;
 }
 
-} // namespace
+/* Returns a vector of memref_t with instr encodings.
+ * For memref_with_IR_t, the caller has to set tid + pid fields of the memref_t in
+ * memref_with_IR_t structs but not the other fields. For other memrefs the caller
+ * should still set everything they need. Also note that all data memrefs have to
+ * be filled in for each instr when constructing memref_instr_vec. Each instr
+ * field in memref_instr_vec's elements needs to be constructed using DR's IR
+ * API for creating instructions. Any PC-relative instr in ilist is encoded as
+ * though the final instruction list were located at base_addr.
+ * Markers with instr fields will have their values replaced with the instr's PC.
+ */
+std::vector<memref_t>
+add_encodings_to_memrefs(instrlist_t *ilist,
+                         std::vector<memref_with_IR_t> &memref_instr_vec,
+                         addr_t base_addr)
+{
+    static const int MAX_DECODE_SIZE = 2048;
+    byte decode_buf[MAX_DECODE_SIZE];
+    byte *pc =
+        instrlist_encode_to_copy(GLOBAL_DCONTEXT, ilist, decode_buf,
+                                 reinterpret_cast<app_pc>(base_addr), nullptr, true);
+    assert(pc != nullptr);
+    assert(pc <= decode_buf + sizeof(decode_buf));
+    std::vector<memref_t> memrefs = {};
+    for (auto pair : memref_instr_vec) {
+        if (type_is_instr(pair.memref.instr.type)) {
+            assert(pair.instr != nullptr);
+            const size_t offset = instr_get_offset(pair.instr);
+            const int instr_size = instr_length(GLOBAL_DCONTEXT, pair.instr);
+            pair.memref.instr.addr = offset + base_addr;
+            pair.memref.instr.size = instr_size;
+            memcpy(pair.memref.instr.encoding, &decode_buf[offset], instr_size);
+            pair.memref.instr.encoding_is_new = true;
+        } else if (pair.memref.marker.type == TRACE_TYPE_MARKER &&
+                   pair.instr != nullptr) {
+            pair.memref.marker.marker_value = instr_get_offset(pair.instr) + base_addr;
+        } else
+            assert(pair.instr == nullptr);
+        memrefs.push_back(pair.memref);
+    }
+    return memrefs;
+}
+
+} // namespace drmemtrace
+} // namespace dynamorio
 
 #endif /* _MEMREF_GEN_ */

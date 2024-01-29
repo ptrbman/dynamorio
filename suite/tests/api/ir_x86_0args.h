@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2016 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2008-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -46,10 +46,9 @@ OPCODE(std, std, std, 0)
 OPCODE(clts, clts, clts, 0)
 OPCODE(invd, invd, invd, 0)
 OPCODE(wbinvd, wbinvd, wbinvd, 0)
-OPCODE(ud2a, ud2a, ud2a, 0)
+OPCODE(ud2, ud2, ud2, 0)
 OPCODE(emms, emms, emms, 0)
 OPCODE(rsm, rsm, rsm, 0)
-OPCODE(ud2b, ud2b, ud2b, 0)
 OPCODE(lfence, lfence, lfence, 0)
 OPCODE(mfence, mfence, mfence, 0)
 OPCODE(sfence, sfence, sfence, 0)
@@ -198,3 +197,6 @@ OPCODE(xtest, xtest, xtest, 0)
 
 OPCODE(rdpkru, rdpkru, rdpkru, 0)
 OPCODE(wrpkru, wrpkru, wrpkru, 0)
+
+OPCODE(clac, clac, clac, 0)
+OPCODE(stac, stac, stac, 0)

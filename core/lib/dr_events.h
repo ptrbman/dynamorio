@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2010-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2010-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2002-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -997,7 +997,14 @@ typedef enum {
     DR_XFER_CONTINUE,           /**< NtContinue system call. */
     DR_XFER_SET_CONTEXT_THREAD, /**< NtSetContextThread system call. */
     DR_XFER_CLIENT_REDIRECT,    /**< dr_redirect_execution() or #DR_SIGNAL_REDIRECT. */
-    DR_XFER_RSEQ_ABORT,         /**< A Linux restartable sequence was aborted. */
+    /**
+     * A Linux restartable sequence was aborted.  The interrupted PC for a signal in
+     * the execution instrumentation points to the precise interrupted
+     * instruction; but for an abort in the native exeuction, the PC always points
+     * to the abort handler, rather than the precise instruction that was aborted.
+     * This aligns with kernel behavior: the interrupted PC is not saved anywhere.
+     */
+    DR_XFER_RSEQ_ABORT,
 } dr_kernel_xfer_type_t;
 
 /** Data structure passed for dr_register_kernel_xfer_event(). */
@@ -1768,12 +1775,11 @@ DR_API
  * \return whether successful.
  */
 bool
-dr_register_persist_ro(size_t (*func_size)(void *drcontext, void *perscxt,
-                                           size_t file_offs, void **user_data OUT),
-                       bool (*func_persist)(void *drcontext, void *perscxt, file_t fd,
-                                            void *user_data),
-                       bool (*func_resurrect)(void *drcontext, void *perscxt,
-                                              byte **map INOUT));
+dr_register_persist_ro(
+    size_t (*func_size)(void *drcontext, void *perscxt, size_t file_offs,
+                        void **user_data DR_PARAM_OUT),
+    bool (*func_persist)(void *drcontext, void *perscxt, file_t fd, void *user_data),
+    bool (*func_resurrect)(void *drcontext, void *perscxt, byte **map DR_PARAM_OUT));
 
 DR_API
 /**
@@ -1782,12 +1788,11 @@ DR_API
  * (e.g., one of the functions was not registered).
  */
 bool
-dr_unregister_persist_ro(size_t (*func_size)(void *drcontext, void *perscxt,
-                                             size_t file_offs, void **user_data OUT),
-                         bool (*func_persist)(void *drcontext, void *perscxt, file_t fd,
-                                              void *user_data),
-                         bool (*func_resurrect)(void *drcontext, void *perscxt,
-                                                byte **map INOUT));
+dr_unregister_persist_ro(
+    size_t (*func_size)(void *drcontext, void *perscxt, size_t file_offs,
+                        void **user_data DR_PARAM_OUT),
+    bool (*func_persist)(void *drcontext, void *perscxt, file_t fd, void *user_data),
+    bool (*func_resurrect)(void *drcontext, void *perscxt, byte **map DR_PARAM_OUT));
 
 DR_API
 /**
@@ -1842,12 +1847,11 @@ DR_API
  * \return whether successful.
  */
 bool
-dr_register_persist_rx(size_t (*func_size)(void *drcontext, void *perscxt,
-                                           size_t file_offs, void **user_data OUT),
-                       bool (*func_persist)(void *drcontext, void *perscxt, file_t fd,
-                                            void *user_data),
-                       bool (*func_resurrect)(void *drcontext, void *perscxt,
-                                              byte **map INOUT));
+dr_register_persist_rx(
+    size_t (*func_size)(void *drcontext, void *perscxt, size_t file_offs,
+                        void **user_data DR_PARAM_OUT),
+    bool (*func_persist)(void *drcontext, void *perscxt, file_t fd, void *user_data),
+    bool (*func_resurrect)(void *drcontext, void *perscxt, byte **map DR_PARAM_OUT));
 
 DR_API
 /**
@@ -1856,12 +1860,11 @@ DR_API
  * (e.g., one of the functions was not registered).
  */
 bool
-dr_unregister_persist_rx(size_t (*func_size)(void *drcontext, void *perscxt,
-                                             size_t file_offs, void **user_data OUT),
-                         bool (*func_persist)(void *drcontext, void *perscxt, file_t fd,
-                                              void *user_data),
-                         bool (*func_resurrect)(void *drcontext, void *perscxt,
-                                                byte **map INOUT));
+dr_unregister_persist_rx(
+    size_t (*func_size)(void *drcontext, void *perscxt, size_t file_offs,
+                        void **user_data DR_PARAM_OUT),
+    bool (*func_persist)(void *drcontext, void *perscxt, file_t fd, void *user_data),
+    bool (*func_resurrect)(void *drcontext, void *perscxt, byte **map DR_PARAM_OUT));
 
 DR_API
 /**
@@ -1914,12 +1917,11 @@ DR_API
  * \return whether successful.
  */
 bool
-dr_register_persist_rw(size_t (*func_size)(void *drcontext, void *perscxt,
-                                           size_t file_offs, void **user_data OUT),
-                       bool (*func_persist)(void *drcontext, void *perscxt, file_t fd,
-                                            void *user_data),
-                       bool (*func_resurrect)(void *drcontext, void *perscxt,
-                                              byte **map INOUT));
+dr_register_persist_rw(
+    size_t (*func_size)(void *drcontext, void *perscxt, size_t file_offs,
+                        void **user_data DR_PARAM_OUT),
+    bool (*func_persist)(void *drcontext, void *perscxt, file_t fd, void *user_data),
+    bool (*func_resurrect)(void *drcontext, void *perscxt, byte **map DR_PARAM_OUT));
 
 DR_API
 /**
@@ -1928,12 +1930,11 @@ DR_API
  * (e.g., one of the functions was not registered).
  */
 bool
-dr_unregister_persist_rw(size_t (*func_size)(void *drcontext, void *perscxt,
-                                             size_t file_offs, void **user_data OUT),
-                         bool (*func_persist)(void *drcontext, void *perscxt, file_t fd,
-                                              void *user_data),
-                         bool (*func_resurrect)(void *drcontext, void *perscxt,
-                                                byte **map INOUT));
+dr_unregister_persist_rw(
+    size_t (*func_size)(void *drcontext, void *perscxt, size_t file_offs,
+                        void **user_data DR_PARAM_OUT),
+    bool (*func_persist)(void *drcontext, void *perscxt, file_t fd, void *user_data),
+    bool (*func_resurrect)(void *drcontext, void *perscxt, byte **map DR_PARAM_OUT));
 
 DR_API
 /**

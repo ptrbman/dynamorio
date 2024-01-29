@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2016-2020 Google, Inc.  All rights reserved.
+ * Copyright (c) 2016-2024 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -30,13 +30,32 @@
  * DAMAGE.
  */
 
+#include "reuse_distance.h"
+
+#include <stddef.h>
+#include <stdint.h>
+
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
-#include "reuse_distance.h"
-#include "../common/utils.h"
+
+#include "analysis_tool.h"
+#include "memref.h"
+#include "reuse_distance_create.h"
+#include "trace_entry.h"
+#include "utils.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 const std::string reuse_distance_t::TOOL_NAME = "Reuse distance tool";
 
@@ -66,6 +85,20 @@ reuse_distance_t::~reuse_distance_t()
     }
 }
 
+std::string
+reuse_distance_t::initialize_stream(memtrace_stream_t *serial_stream)
+{
+    serial_stream_ = serial_stream;
+    return "";
+}
+
+std::string
+reuse_distance_t::initialize_shard_type(shard_type_t shard_type)
+{
+    shard_type_ = shard_type;
+    return "";
+}
+
 reuse_distance_t::shard_data_t::shard_data_t(uint64_t reuse_threshold, uint64_t skip_dist,
                                              uint32_t distance_limit, bool verify)
     : distance_limit(distance_limit)
@@ -81,11 +114,14 @@ reuse_distance_t::parallel_shard_supported()
 }
 
 void *
-reuse_distance_t::parallel_shard_init(int shard_index, void *worker_data)
+reuse_distance_t::parallel_shard_init_stream(int shard_index, void *worker_data,
+                                             memtrace_stream_t *stream)
 {
     auto shard = new shard_data_t(knobs_.distance_threshold, knobs_.skip_list_distance,
                                   knobs_.distance_limit, knobs_.verify_skip);
     std::lock_guard<std::mutex> guard(shard_map_mutex_);
+    shard->core = stream->get_output_cpuid();
+    shard->tid = stream->get_tid();
     shard_map_[shard_index] = shard;
     return reinterpret_cast<void *>(shard);
 }
@@ -119,16 +155,16 @@ reuse_distance_t::parallel_shard_memref(void *shard_data, const memref_t &memref
         }
         std::cerr << "\n";
     });
-    if (memref.data.type == TRACE_TYPE_THREAD_EXIT) {
-        shard->tid = memref.exit.tid;
-        return true;
-    }
-    if (type_is_instr(memref.instr.type) || memref.data.type == TRACE_TYPE_READ ||
+    bool is_instr_type = type_is_instr(memref.instr.type);
+    if (is_instr_type || memref.data.type == TRACE_TYPE_READ ||
         memref.data.type == TRACE_TYPE_WRITE ||
         // We may potentially handle prefetches differently.
         // TRACE_TYPE_PREFETCH_INSTR is handled above.
         type_is_prefetch(memref.data.type)) {
         ++shard->total_refs;
+        if (!is_instr_type) {
+            ++shard->data_refs;
+        }
         addr_t tag = memref.data.addr >> line_size_bits_;
         std::unordered_map<addr_t, line_ref_t *>::iterator it =
             shard->cache_map.find(tag);
@@ -159,11 +195,11 @@ reuse_distance_t::parallel_shard_memref(void *shard_data, const memref_t &memref
                 delete ref;
             }
         } else {
-            int_least64_t dist = shard->ref_list->move_to_front(it->second);
-            std::unordered_map<int_least64_t, int_least64_t>::iterator dist_it =
-                shard->dist_map.find(dist);
-            if (dist_it == shard->dist_map.end())
-                shard->dist_map.insert(std::pair<int_least64_t, int_least64_t>(dist, 1));
+            int64_t dist = shard->ref_list->move_to_front(it->second);
+            auto &dist_map = is_instr_type ? shard->dist_map : shard->dist_map_data;
+            distance_histogram_t::iterator dist_it = dist_map.find(dist);
+            if (dist_it == dist_map.end())
+                dist_map.insert(distance_map_pair_t(dist, 1));
             else
                 ++dist_it->second;
             IF_DEBUG_VERBOSE(3, std::cerr << "Distance is " << std::dec << dist << "\n");
@@ -175,13 +211,15 @@ reuse_distance_t::parallel_shard_memref(void *shard_data, const memref_t &memref
 bool
 reuse_distance_t::process_memref(const memref_t &memref)
 {
-    // For serial operation we index using the tid.
     shard_data_t *shard;
-    const auto &lookup = shard_map_.find(memref.data.tid);
+    int shard_index = serial_stream_->get_shard_index();
+    const auto &lookup = shard_map_.find(shard_index);
     if (lookup == shard_map_.end()) {
         shard = new shard_data_t(knobs_.distance_threshold, knobs_.skip_list_distance,
                                  knobs_.distance_limit, knobs_.verify_skip);
-        shard_map_[memref.data.tid] = shard;
+        shard->core = serial_stream_->get_output_cpuid();
+        shard->tid = serial_stream_->get_tid();
+        shard_map_[shard_index] = shard;
     } else
         shard = lookup->second;
     if (!parallel_shard_memref(reinterpret_cast<void *>(shard), memref)) {
@@ -192,8 +230,8 @@ reuse_distance_t::process_memref(const memref_t &memref)
 }
 
 static bool
-cmp_dist_key(const std::pair<int_least64_t, int_least64_t> &l,
-             const std::pair<int_least64_t, int_least64_t> &r)
+cmp_dist_key(const reuse_distance_t::distance_map_pair_t &l,
+             const reuse_distance_t::distance_map_pair_t &r)
 {
     return l.first < r.first;
 }
@@ -236,6 +274,8 @@ reuse_distance_t::print_shard_results(const shard_data_t *shard)
     // If no accesses were processed, there's nothing more to report.
     if (shard->total_refs == 0)
         return;
+    std::cerr << "Instruction accesses: " << shard->total_refs - shard->data_refs << "\n";
+    std::cerr << "Data accesses: " << shard->data_refs << "\n";
     std::cerr << "Unique accesses: " << shard->ref_list->cur_time_ << "\n";
     std::cerr << "Unique cache lines accessed: "
               << shard->cache_map.size() + shard->pruned_addresses.size() << "\n";
@@ -248,7 +288,7 @@ reuse_distance_t::print_shard_results(const shard_data_t *shard)
     std::cerr.setf(std::ios::fixed);
 
     double sum = 0.0;
-    int_least64_t count = 0;
+    int64_t count = 0;
     for (const auto &it : shard->dist_map) {
         sum += it.first * it.second;
         count += it.second;
@@ -256,9 +296,9 @@ reuse_distance_t::print_shard_results(const shard_data_t *shard)
     double mean = sum / count;
     std::cerr << "Reuse distance mean: " << mean << "\n";
     double sum_of_squares = 0;
-    int_least64_t recount = 0;
+    int64_t recount = 0;
     bool have_median = false;
-    std::vector<std::pair<int_least64_t, int_least64_t>> sorted(shard->dist_map.size());
+    std::vector<distance_map_pair_t> sorted(shard->dist_map.size());
     std::partial_sort_copy(shard->dist_map.begin(), shard->dist_map.end(), sorted.begin(),
                            sorted.end(), cmp_dist_key);
     for (auto it = sorted.begin(); it != sorted.end(); ++it) {
@@ -276,7 +316,7 @@ reuse_distance_t::print_shard_results(const shard_data_t *shard)
     std::cerr << "Reuse distance standard deviation: " << stddev << "\n";
 
     if (knobs_.report_histogram) {
-        print_histogram(std::cerr, count, sorted);
+        print_histogram(std::cerr, count, sorted, shard->dist_map_data);
     } else {
         std::cerr << "(Pass -reuse_distance_histogram to see all the data.)\n";
     }
@@ -322,9 +362,9 @@ reuse_distance_t::print_shard_results(const shard_data_t *shard)
 }
 
 void
-reuse_distance_t::print_histogram(
-    std::ostream &out, int_least64_t total_count,
-    const std::vector<std::pair<int_least64_t, int_least64_t>> &sorted)
+reuse_distance_t::print_histogram(std::ostream &out, int64_t total_count,
+                                  const std::vector<distance_map_pair_t> &sorted,
+                                  const distance_histogram_t &dist_map_data)
 {
     std::ios_base::fmtflags saved_flags(out.flags());
     double bin_multiplier = knobs_.histogram_bin_multiplier;
@@ -332,22 +372,33 @@ reuse_distance_t::print_histogram(
     bool show_bin_range = bin_multiplier > 1.0;
     out << "Reuse distance histogram bin multiplier: " << bin_multiplier << "\n";
     out << "Reuse distance histogram:\n";
+    std::string header_str =
+        "                      All References       :            Data References";
     if (show_bin_range) {
+        out << "           " << header_str << "\n";
         out << "Distance [min-max] ";
     } else {
+        out << header_str << "\n";
         out << "Distance";
     }
     out << std::setw(12) << "Count"
-        << "  Percent  Cumulative\n";
-    int_least64_t max_distance = sorted.empty() ? 0 : sorted.back().first;
+        << "  Percent  Cumulative"
+        << "  :       Count  Percent  Cumulative\n";
+    int64_t max_distance = sorted.empty() ? 0 : sorted.back().first;
     double cum_percent = 0;
-    int_least64_t bin_count = 0;
-    int_least64_t bin_size = 1;
+    double data_cum_percent = 0;
+    int64_t bin_count = 0;
+    int64_t data_bin_count = 0;
+    int64_t bin_size = 1;
     double bin_size_float = 1.0;
-    int_least64_t bin_start = 0;
-    int_least64_t bin_next_start = bin_start + bin_size;
+    int64_t bin_start = 0;
+    int64_t bin_next_start = bin_start + bin_size;
     for (auto it = sorted.begin(); it != sorted.end(); ++it) {
         const auto this_bin_number = it->first;
+        auto data_it = dist_map_data.find(this_bin_number);
+        int64_t this_bin_count = it->second;
+        int64_t this_data_bin_count =
+            data_it == dist_map_data.end() ? 0 : data_it->second;
         // The last bin needs to force an output.
         bool last_bin = *it == sorted.back();
         // If the new bin number is after the end of the current bin
@@ -355,30 +406,39 @@ reuse_distance_t::print_histogram(
         // Repeat until the bin range includes the new bin.
         while (this_bin_number >= bin_next_start || last_bin) {
             if (last_bin && this_bin_number < bin_next_start) {
-                bin_count += it->second;
+                bin_count += this_bin_count;
+                data_bin_count += this_data_bin_count;
                 last_bin = false;
             }
             double percent =
                 total_count > 0 ? bin_count / static_cast<double>(total_count) : 0.0;
+            double data_percent =
+                total_count > 0 ? data_bin_count / static_cast<double>(total_count) : 0.0;
             cum_percent += percent;
+            data_cum_percent += data_percent;
             // Don't output empty bins.
             if (bin_count > 0) {
-                out << std::setw(8) << bin_start;
+                out << std::setw(8) << std::right << bin_start;
                 if (show_bin_range) {
                     out << " - " << std::setw(8)
                         << std::min(max_distance, bin_next_start - 1);
                 }
                 out << std::setw(12) << bin_count << std::setw(8) << percent * 100. << "%"
-                    << std::setw(8) << cum_percent * 100. << "%\n";
+                    << std::setw(8) << cum_percent * 100. << "%";
+                out << "     : " << std::setw(11) << data_bin_count << std::setw(8)
+                    << data_percent * 100. << "%" << std::setw(8)
+                    << data_cum_percent * 100. << "%\n";
             }
             bin_count = 0;
+            data_bin_count = 0;
             bin_start = bin_next_start;
             bin_size_float *= bin_multiplier;
             // Use floor() to favor smaller bin sizes.
-            bin_size = static_cast<int_least64_t>(std::floor(bin_size_float));
+            bin_size = static_cast<int64_t>(std::floor(bin_size_float));
             bin_next_start = bin_start + bin_size;
         }
-        bin_count += it->second;
+        bin_count += this_bin_count;
+        data_bin_count += this_data_bin_count;
     }
     out.flags(saved_flags);
 }
@@ -394,8 +454,9 @@ reuse_distance_t::get_aggregated_results()
     aggregated_results_ = std::unique_ptr<shard_data_t>(
         new shard_data_t(knobs_.distance_threshold, knobs_.skip_list_distance,
                          knobs_.distance_limit, knobs_.verify_skip));
-    for (const auto &shard : shard_map_) {
+    for (auto &shard : shard_map_) {
         aggregated_results_->total_refs += shard.second->total_refs;
+        aggregated_results_->data_refs += shard.second->data_refs;
         aggregated_results_->pruned_address_hits += shard.second->pruned_address_hits;
         aggregated_results_->pruned_address_count += shard.second->pruned_address_count;
         // We simply sum the unique accesses.
@@ -406,6 +467,18 @@ reuse_distance_t::get_aggregated_results()
         for (const auto &entry : shard.second->pruned_addresses) {
             aggregated_results_->pruned_addresses.insert(entry);
         }
+        // Merge dist_map_data with aggregated dist_map_data, and also
+        // merge it into the shard's dist_map if it needs merging.
+        bool shard_needs_merge = shard.second->dist_map_is_instr_only;
+        for (const auto &entry : shard.second->dist_map_data) {
+            aggregated_results_->dist_map_data[entry.first] += entry.second;
+            if (shard_needs_merge) {
+                shard.second->dist_map[entry.first] += entry.second;
+            }
+        }
+        // If it didn't include data already, it does now.
+        shard.second->dist_map_is_instr_only = false;
+        // Merge the unified histogram data.
         for (const auto &entry : shard.second->dist_map) {
             aggregated_results_->dist_map[entry.first] += entry.second;
         }
@@ -424,6 +497,7 @@ reuse_distance_t::get_aggregated_results()
             ref->distant_refs += entry.second->distant_refs;
         }
     }
+    aggregated_results_->dist_map_is_instr_only = false;
     return aggregated_results_.get();
 }
 
@@ -439,15 +513,19 @@ reuse_distance_t::print_results()
     }
 
     if (shard_map_.size() > 1) {
-        using keyval_t = std::pair<memref_tid_t, shard_data_t *>;
+        using keyval_t = std::pair<int, shard_data_t *>;
         std::vector<keyval_t> sorted(shard_map_.begin(), shard_map_.end());
         std::sort(sorted.begin(), sorted.end(), [](const keyval_t &l, const keyval_t &r) {
             return l.second->total_refs > r.second->total_refs;
         });
         for (const auto &shard : sorted) {
             std::cerr << "\n==================================================\n"
-                      << TOOL_NAME << " results for shard " << shard.first << " (thread "
-                      << shard.second->tid << "):\n";
+                      << TOOL_NAME << " results for shard " << shard.first;
+            if (shard_type_ == SHARD_BY_THREAD)
+                std::cerr << " (thread " << shard.second->tid;
+            else
+                std::cerr << " (core " << shard.second->core;
+            std::cerr << "):\n";
             print_shard_results(shard.second);
         }
     }
@@ -456,3 +534,6 @@ reuse_distance_t::print_results()
     std::cerr << std::dec;
     return true;
 }
+
+} // namespace drmemtrace
+} // namespace dynamorio

@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2023 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -155,6 +155,77 @@ test_noalloc(void)
      */
 }
 
+#define CHECK_CATEGORY(dcontext, instr, pc, category)                          \
+    ASSERT(instr_encode(dcontext, instr, pc) - pc < BUFFER_SIZE_ELEMENTS(pc)); \
+    instr_reset(dcontext, instr);                                              \
+    instr_set_operands_valid(instr, true);                                     \
+    ASSERT(decode(dcontext, pc, instr) != NULL);                               \
+    ASSERT(instr_get_category(instr) == category);                             \
+    instr_destroy(dcontext, instr);
+
+static void
+test_categories(void)
+{
+    instr_t *instr;
+    byte buf[128];
+
+    /*  55 OP_mov_ld */
+    instr = XINST_CREATE_load(GD, opnd_create_reg(DR_REG_XAX),
+                              OPND_CREATE_MEMPTR(DR_REG_XAX, 42));
+    CHECK_CATEGORY(GD, instr, buf, DR_INSTR_CATEGORY_LOAD);
+
+    /*  14 OP_cmp */
+    instr =
+        XINST_CREATE_cmp(GD, opnd_create_reg(DR_REG_EAX), opnd_create_reg(DR_REG_EAX));
+    CHECK_CATEGORY(GD, instr, buf, DR_INSTR_CATEGORY_MATH);
+
+    /* 46 OP_jmp */
+    instr_t *after_callee = INSTR_CREATE_label(GD);
+    instr = XINST_CREATE_jump(GD, opnd_create_instr(after_callee));
+    CHECK_CATEGORY(GD, instr, buf, DR_INSTR_CATEGORY_BRANCH);
+}
+
+static void
+test_store_source(void)
+{
+    instr_t *in = XINST_CREATE_store(GD, OPND_CREATE_MEMPTR(DR_REG_XAX, 42),
+                                     opnd_create_reg(DR_REG_XDX));
+    ASSERT(!instr_is_opnd_store_source(in, -1)); /* Out of bounds. */
+    ASSERT(instr_is_opnd_store_source(in, 0));   /* xdx. */
+    ASSERT(!instr_is_opnd_store_source(in, 1));  /* Out of bounds. */
+    instr_destroy(GD, in);
+
+    in = INSTR_CREATE_add(GD, OPND_CREATE_MEMPTR(DR_REG_XAX, 42),
+                          opnd_create_reg(DR_REG_XDX));
+    ASSERT(!instr_is_opnd_store_source(in, -1)); /* Out of bounds. */
+    ASSERT(instr_is_opnd_store_source(in, 0));   /* xdx. */
+    ASSERT(instr_is_opnd_store_source(in, 1));   /* memop. */
+    ASSERT(!instr_is_opnd_store_source(in, 2));  /* Out of bounds. */
+    instr_destroy(GD, in);
+
+    in = INSTR_CREATE_cmpxchg8b(
+        GD, opnd_create_base_disp(DR_REG_XAX, DR_REG_NULL, 0, 42, OPSZ_8));
+    ASSERT(!instr_is_opnd_store_source(in, 0)); /* Memop. */
+    ASSERT(!instr_is_opnd_store_source(in, 1)); /* xax. */
+    ASSERT(!instr_is_opnd_store_source(in, 2)); /* xdx. */
+    ASSERT(instr_is_opnd_store_source(in, 3));  /* xcx. */
+    ASSERT(instr_is_opnd_store_source(in, 4));  /* xbx. */
+    instr_destroy(GD, in);
+
+#ifndef X64
+    in = INSTR_CREATE_pusha(GD);
+    ASSERT(instr_is_opnd_store_source(in, 0)); /* xsp. */
+    ASSERT(instr_is_opnd_store_source(in, 1)); /* xax. */
+    ASSERT(instr_is_opnd_store_source(in, 2)); /* xbx. */
+    ASSERT(instr_is_opnd_store_source(in, 3)); /* xcx. */
+    ASSERT(instr_is_opnd_store_source(in, 4)); /* xdx. */
+    ASSERT(instr_is_opnd_store_source(in, 5)); /* xbp. */
+    ASSERT(instr_is_opnd_store_source(in, 6)); /* xsi. */
+    ASSERT(instr_is_opnd_store_source(in, 7)); /* xdi. */
+    instr_destroy(GD, in);
+#endif
+}
+
 int
 main()
 {
@@ -165,6 +236,10 @@ main()
     test_ptrsz_imm();
 
     test_noalloc();
+
+    test_categories();
+
+    test_store_source();
 
     printf("done\n");
 

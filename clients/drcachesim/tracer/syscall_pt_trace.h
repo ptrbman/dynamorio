@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2023 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -37,11 +37,16 @@
 #define _SYSCALL_PT_TRACE_ 1
 
 #include <cstddef>
+#include <string>
 
-#include "../common/utils.h"
 #include "dr_api.h"
 #include "drmemtrace.h"
 #include "drpttracer.h"
+#include "trace_entry.h"
+#include "utils.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 /* The auto cleanup wrapper of pttracer handle.
  * This can ensure the pttracer handle is cleaned up when it is out of scope.
@@ -84,7 +89,6 @@ public:
     {
         ASSERT(drcontext != nullptr, "invalid drcontext");
         if (data != nullptr) {
-            void *drcontext = dr_get_current_drcontext();
             drpttracer_destroy_output(drcontext, data);
             data = nullptr;
         }
@@ -108,14 +112,14 @@ public:
      * pass in the output directory and the file write function.
      */
     bool
-    init(void *drcontext, char *pt_dir_name, size_t pt_dir_name_size,
-         drmemtrace_open_file_func_t open_file_func,
+    init(void *drcontext, char *pt_dir_name,
+         drmemtrace_open_file_ex_func_t open_file_ex_func,
          drmemtrace_write_file_func_t write_file_func,
          drmemtrace_close_file_func_t close_file_func);
 
     /* Start the PT tracing for current syscall and store the sysnum of the syscall. */
     bool
-    start_syscall_pt_trace(IN int sysnum);
+    start_syscall_pt_trace(DR_PARAM_IN int sysnum);
 
     /* Stop the PT tracing for current syscall and dump the output data to one file. */
     bool
@@ -128,14 +132,12 @@ public:
         return cur_recording_sysnum_;
     }
 
-    /* Get the id of the last recorded syscall.
-     * The id is the index of the last recorded syscall in this thread's recorded syscall
-     * list.
+    /* Get the index of the traced syscall.
      */
     int
-    get_last_recorded_syscall_id()
+    get_traced_syscall_idx()
     {
-        return recorded_syscall_count_;
+        return traced_syscall_idx_;
     }
 
     /* Check whether the syscall's PT need to be recorded.
@@ -143,15 +145,19 @@ public:
      * supported.
      */
     static bool
-    is_syscall_pt_trace_enabled(IN int sysnum);
+    is_syscall_pt_trace_enabled(DR_PARAM_IN int sysnum);
 
 private:
-    /* Dump PT trace and the metadata to files. */
+    /* Dump the metadata to a per-thread file. */
+    bool
+    metadata_dump(pt_metadata_t metadata);
+
+    /* Dump PT trace data to a per-thread file. */
     bool
     trace_data_dump(drpttracer_output_autoclean_t &output);
 
     /* The shared file open function. */
-    drmemtrace_open_file_func_t open_file_func_;
+    drmemtrace_open_file_ex_func_t open_file_ex_func_;
 
     /* The shared file write function. */
     drmemtrace_write_file_func_t write_file_func_;
@@ -159,22 +165,42 @@ private:
     /* The shared file close function. */
     drmemtrace_close_file_func_t close_file_func_;
 
+    /* Indicates whether the syscall_pt_trace instance has been initialized. The init
+     * function should be called only once per thread.
+     */
+    bool is_initialized_;
+
     /* The pttracer handle held by this instance. */
     drpttracer_handle_autoclean_t pttracer_handle_;
 
-    /* The number of recorded syscall. */
-    int recorded_syscall_count_;
+    /* The pttracer output data held by every instance. The output buffer stores PT trace
+     * data for each system call. The buffer will be updated when stop_syscall_pt_trace()
+     * is invoked.
+     */
+    drpttracer_output_autoclean_t pttracer_output_buffer_;
+
+    /* The index of the traced syscall. */
+    int traced_syscall_idx_;
 
     /* The sysnum of current recording syscall. */
     int cur_recording_sysnum_;
+
+    /* Flag to indicate if metadata is being dumped. */
+    bool is_dumping_metadata_;
 
     /* The drcontext.
      * We need ensure pass the same context to all drpttracer's APIs.
      */
     void *drcontext_;
 
-    /* The output directory name. */
-    char pt_dir_name_[MAXIMUM_PATH];
+    /* The output file.
+     * It is a per-thread file. It stores the PT trace data and metadata for
+     * every syscall in the current thread.
+     */
+    file_t output_file_;
 };
+
+} // namespace drmemtrace
+} // namespace dynamorio
 
 #endif /* _SYSCALL_PT_TRACE_ */

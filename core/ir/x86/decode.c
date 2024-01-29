@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2000-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -80,21 +80,47 @@
 
 /* used for VEX decoding */
 #define xx TYPE_NONE, OPSZ_NA
-static const instr_info_t escape_instr = { ESCAPE, 0x000000, "(bad)", xx, xx, xx,
-                                           xx,     xx,       0,       0,  0 };
-static const instr_info_t escape_38_instr = {
-    ESCAPE_3BYTE_38, 0x000000, "(bad)", xx, xx, xx, xx, xx, 0, 0, 0
+static const instr_info_t escape_instr = {
+    ESCAPE, 0x000000, DR_INSTR_CATEGORY_UNCATEGORIZED, "(bad)", xx, xx, xx, xx, xx, 0,
+    0,      0
 };
-static const instr_info_t escape_3a_instr = {
-    ESCAPE_3BYTE_3a, 0x000000, "(bad)", xx, xx, xx, xx, xx, 0, 0, 0
-};
+static const instr_info_t escape_38_instr = { ESCAPE_3BYTE_38,
+                                              0x000000,
+                                              DR_INSTR_CATEGORY_UNCATEGORIZED,
+                                              "(bad)",
+                                              xx,
+                                              xx,
+                                              xx,
+                                              xx,
+                                              xx,
+                                              0,
+                                              0,
+                                              0 };
+static const instr_info_t escape_3a_instr = { ESCAPE_3BYTE_3a,
+                                              0x000000,
+                                              DR_INSTR_CATEGORY_UNCATEGORIZED,
+                                              "(bad)",
+                                              xx,
+                                              xx,
+                                              xx,
+                                              xx,
+                                              xx,
+                                              0,
+                                              0,
+                                              0 };
 /* used for XOP decoding */
-static const instr_info_t xop_8_instr = { XOP_8_EXT, 0x000000, "(bad)", xx, xx, xx,
-                                          xx,        xx,       0,       0,  0 };
-static const instr_info_t xop_9_instr = { XOP_9_EXT, 0x000000, "(bad)", xx, xx, xx,
-                                          xx,        xx,       0,       0,  0 };
-static const instr_info_t xop_a_instr = { XOP_A_EXT, 0x000000, "(bad)", xx, xx, xx,
-                                          xx,        xx,       0,       0,  0 };
+static const instr_info_t xop_8_instr = {
+    XOP_8_EXT, 0x000000, DR_INSTR_CATEGORY_UNCATEGORIZED, "(bad)", xx, xx, xx, xx, xx, 0,
+    0,         0
+};
+static const instr_info_t xop_9_instr = {
+    XOP_9_EXT, 0x000000, DR_INSTR_CATEGORY_UNCATEGORIZED, "(bad)", xx, xx, xx, xx, xx, 0,
+    0,         0
+};
+static const instr_info_t xop_a_instr = {
+    XOP_A_EXT, 0x000000, DR_INSTR_CATEGORY_UNCATEGORIZED, "(bad)", xx, xx, xx, xx, xx, 0,
+    0,         0
+};
 #undef xx
 
 bool
@@ -634,7 +660,7 @@ read_modrm(byte *pc, decode_info_t *di)
  */
 static byte *
 read_vex(byte *pc, decode_info_t *di, byte instr_byte,
-         const instr_info_t **ret_info INOUT, bool *is_vex /*or xop*/)
+         const instr_info_t **ret_info DR_PARAM_INOUT, bool *is_vex /*or xop*/)
 {
     int idx = 0;
     const instr_info_t *info;
@@ -761,7 +787,7 @@ read_vex(byte *pc, decode_info_t *di, byte instr_byte,
  */
 static byte *
 read_evex(byte *pc, decode_info_t *di, byte instr_byte,
-          const instr_info_t **ret_info INOUT, bool *is_evex)
+          const instr_info_t **ret_info DR_PARAM_INOUT, bool *is_evex)
 {
     const instr_info_t *info;
     byte prefix_byte = 0, evex_pp = 0;
@@ -1024,7 +1050,8 @@ read_instruction(byte *pc, byte *orig_pc, const instr_info_t **ret_info,
                        info->code <= REG_STOP_SEGMENT) {
                 CLIENT_ASSERT_TRUNCATE(di->seg_override, ushort, info->code,
                                        "decode error: invalid segment override");
-                di->seg_override = (reg_id_t)info->code;
+                if (!X64_MODE(di) || REG_START_SEGMENT_x64 <= info->code)
+                    di->seg_override = (reg_id_t)info->code;
             } else if (info->code == PREFIX_DATA) {
                 /* see if used as part of opcode before considering prefix */
                 di->data_prefix = true;
@@ -2409,6 +2436,34 @@ decode_get_tuple_type_input_size(const instr_info_t *info, decode_info_t *di)
         di->input_size = OPSZ_NA;
 }
 
+/* TODO i#6238: Not all opcodes have been reviewed.
+ * In case an opcode has not been reviewed,
+ * the default category assigned to it is DR_INSTR_CATEGORY_UNCATEGORIZED.
+ */
+static inline void
+decode_category(instr_t *instr)
+{
+    if (instr != NULL) {
+        if (op_instr[instr->opcode] != NULL) {
+            uint category = op_instr[instr->opcode]->category;
+            if (instr_operands_valid(instr)) {
+                if (instr_reads_memory(instr)) {
+                    category |= DR_INSTR_CATEGORY_LOAD;
+                    category &= ~DR_INSTR_CATEGORY_MOVE;
+                }
+                if (instr_writes_memory(instr)) {
+                    category |= DR_INSTR_CATEGORY_STORE;
+                    category &= ~DR_INSTR_CATEGORY_MOVE;
+                }
+            }
+            instr_set_category(instr, category);
+        } else {
+            /* nonvalid opcode */
+            instr_set_category(instr, DR_INSTR_CATEGORY_UNCATEGORIZED);
+        }
+    }
+}
+
 /****************************************************************************
  * Exported routines
  */
@@ -2683,6 +2738,8 @@ decode_common(dcontext_t *dcontext, byte *pc, byte *orig_pc, instr_t *instr)
         /* We must do this AFTER setting raw bits to avoid being invalidated. */
         instr_set_rip_rel_pos(instr, (int)(di.disp_abs - di.start_pc));
     }
+
+    decode_category(instr);
 
     return next_pc;
 

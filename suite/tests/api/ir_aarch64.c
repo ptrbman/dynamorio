@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2015-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2015-2024 Google, Inc.  All rights reserved.
  * Copyright (c) 2016 ARM Limited. All rights reserved.
  * **********************************************************/
 
@@ -378,38 +378,6 @@ test_ldar(void *dc)
         dc, opnd_create_reg(DR_REG_W0),
         opnd_create_base_disp_aarch64(DR_REG_X1, DR_REG_NULL, 0, false, 0, 0, OPSZ_2));
     test_instr_encoding(dc, OP_ldarh, instr);
-}
-
-/* TODO: Add this to a new suite/tests/api/ir_aarch64_v83.c file */
-static void
-test_ldapr(void *dc)
-{
-    byte *pc;
-    instr_t *instr;
-
-    /* LDAPR <Wt>, [<Xn|SP>{,#0}] */
-    instr = INSTR_CREATE_ldapr(
-        dc, opnd_create_reg(DR_REG_W0),
-        opnd_create_base_disp_aarch64(DR_REG_X1, DR_REG_NULL, 0, false, 0, 0, OPSZ_4));
-    test_instr_encoding(dc, OP_ldapr, instr);
-
-    /* LDAPR <Xt>, [<Xn|SP>{,#0}] */
-    instr = INSTR_CREATE_ldapr(
-        dc, opnd_create_reg(DR_REG_X2),
-        opnd_create_base_disp_aarch64(DR_REG_X3, DR_REG_NULL, 0, false, 0, 0, OPSZ_8));
-    test_instr_encoding(dc, OP_ldapr, instr);
-
-    /* LDAPRB <Wt>, [<Xn|SP>{,#0}] */
-    instr = INSTR_CREATE_ldaprb(
-        dc, opnd_create_reg(DR_REG_W4),
-        opnd_create_base_disp_aarch64(DR_REG_X5, DR_REG_NULL, 0, false, 0, 0, OPSZ_1));
-    test_instr_encoding(dc, OP_ldaprb, instr);
-
-    /* LDAPRH <Wt>, [<Xn|SP>{,#0}] */
-    instr = INSTR_CREATE_ldaprh(
-        dc, opnd_create_reg(DR_REG_W6),
-        opnd_create_base_disp_aarch64(DR_REG_X7, DR_REG_NULL, 0, false, 0, 0, OPSZ_2));
-    test_instr_encoding(dc, OP_ldaprh, instr);
 }
 
 static void
@@ -4473,95 +4441,6 @@ test_floatdp3(void *dc)
 }
 
 static void
-test_sve_int_bin_pred_log(void *dc)
-{
-    byte *pc;
-    instr_t *instr;
-
-    /* SVE bitwise logical operations (predicated) */
-
-    instr = INSTR_CREATE_orr_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_P7),
-        opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_Z13), OPND_CREATE_BYTE());
-    test_instr_encoding(dc, OP_orr, instr);
-
-    instr = INSTR_CREATE_orr_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_P7),
-        opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_Z13), OPND_CREATE_HALF());
-    test_instr_encoding(dc, OP_orr, instr);
-
-    instr = INSTR_CREATE_orr_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_P7),
-        opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_Z13), OPND_CREATE_SINGLE());
-    test_instr_encoding(dc, OP_orr, instr);
-
-    instr = INSTR_CREATE_orr_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_P7),
-        opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_Z13), OPND_CREATE_DOUBLE());
-    test_instr_encoding(dc, OP_orr, instr);
-
-    instr = INSTR_CREATE_eor_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z29), opnd_create_reg(DR_REG_P4),
-        opnd_create_reg(DR_REG_Z29), opnd_create_reg(DR_REG_Z2), OPND_CREATE_BYTE());
-    test_instr_encoding(dc, OP_eor, instr);
-
-    instr = INSTR_CREATE_eor_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z29), opnd_create_reg(DR_REG_P4),
-        opnd_create_reg(DR_REG_Z29), opnd_create_reg(DR_REG_Z2), OPND_CREATE_HALF());
-    test_instr_encoding(dc, OP_eor, instr);
-
-    instr = INSTR_CREATE_eor_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z29), opnd_create_reg(DR_REG_P4),
-        opnd_create_reg(DR_REG_Z29), opnd_create_reg(DR_REG_Z2), OPND_CREATE_SINGLE());
-    test_instr_encoding(dc, OP_eor, instr);
-
-    instr = INSTR_CREATE_eor_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z29), opnd_create_reg(DR_REG_P4),
-        opnd_create_reg(DR_REG_Z29), opnd_create_reg(DR_REG_Z2), OPND_CREATE_DOUBLE());
-    test_instr_encoding(dc, OP_eor, instr);
-
-    instr = INSTR_CREATE_and_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z31), opnd_create_reg(DR_REG_P1),
-        opnd_create_reg(DR_REG_Z31), opnd_create_reg(DR_REG_Z23), OPND_CREATE_BYTE());
-    test_instr_encoding(dc, OP_and, instr);
-
-    instr = INSTR_CREATE_and_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z31), opnd_create_reg(DR_REG_P1),
-        opnd_create_reg(DR_REG_Z31), opnd_create_reg(DR_REG_Z23), OPND_CREATE_HALF());
-    test_instr_encoding(dc, OP_and, instr);
-
-    instr = INSTR_CREATE_and_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z31), opnd_create_reg(DR_REG_P1),
-        opnd_create_reg(DR_REG_Z31), opnd_create_reg(DR_REG_Z23), OPND_CREATE_SINGLE());
-    test_instr_encoding(dc, OP_and, instr);
-
-    instr = INSTR_CREATE_and_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z31), opnd_create_reg(DR_REG_P1),
-        opnd_create_reg(DR_REG_Z31), opnd_create_reg(DR_REG_Z23), OPND_CREATE_DOUBLE());
-    test_instr_encoding(dc, OP_and, instr);
-
-    instr = INSTR_CREATE_bic_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_P2),
-        opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_Z24), OPND_CREATE_BYTE());
-    test_instr_encoding(dc, OP_bic, instr);
-
-    instr = INSTR_CREATE_bic_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_P2),
-        opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_Z24), OPND_CREATE_HALF());
-    test_instr_encoding(dc, OP_bic, instr);
-
-    instr = INSTR_CREATE_bic_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_P2),
-        opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_Z24), OPND_CREATE_SINGLE());
-    test_instr_encoding(dc, OP_bic, instr);
-
-    instr = INSTR_CREATE_bic_sve_pred(
-        dc, opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_P2),
-        opnd_create_reg(DR_REG_Z2), opnd_create_reg(DR_REG_Z24), OPND_CREATE_DOUBLE());
-    test_instr_encoding(dc, OP_bic, instr);
-}
-
-static void
 test_asimddiff(void *dc)
 {
     byte *pc;
@@ -5597,7 +5476,7 @@ test_opnd(void *dc)
      */
 }
 
-static uint
+static void
 test_mov_instr_addr_encoding(void *dc, instr_t *instr, uint opcode, uint target_off,
                              uint right_shift_amt, uint mask)
 {
@@ -5615,7 +5494,7 @@ test_mov_instr_addr_encoding(void *dc, instr_t *instr, uint opcode, uint target_
     ASSERT(instr_get_opcode(decin) == opcode);
 
     uint src_op = opcode == OP_movz ? 0 : 1;
-    uint expected_imm = ((ptr_int_t)buf + target_off >> right_shift_amt) & mask;
+    uint expected_imm = (((ptr_int_t)buf + target_off) >> right_shift_amt) & mask;
     ASSERT(opnd_get_immed_int(instr_get_src(decin, src_op)) == expected_imm);
 
     instr_destroy(dc, instr);
@@ -7045,6 +6924,23 @@ test_internal_encode(void *dcontext)
     instr_destroy(dcontext, jmp);
 }
 
+static void
+test_vector_length(void *dcontext)
+{
+    /* XXX i#6575: Add further tests.  For now, make sure these are exported. */
+    const int new_len = 2048;
+    /* XXX: Make this test work when on actual SVE hardware where this API routine
+     * is documented as failing.
+     */
+    bool res = dr_set_sve_vector_length(new_len);
+    ASSERT(res);
+    ASSERT(dr_get_sve_vector_length() == new_len);
+    /* Ensure invalid lengths return failure. */
+    ASSERT(!dr_set_sve_vector_length(0));
+    ASSERT(!dr_set_sve_vector_length(1));
+    ASSERT(!dr_set_sve_vector_length(4096));
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -7062,9 +6958,6 @@ main(int argc, char *argv[])
 
     test_ldar(dcontext);
     print("test_ldar complete\n");
-
-    test_ldapr(dcontext);
-    print("test_ldapr complete\n");
 
     test_ldur_stur(dcontext);
     print("test_ldur_stur complete\n");
@@ -7098,9 +6991,6 @@ main(int argc, char *argv[])
 
     test_floatdp3(dcontext);
     print("test_floatdp3 complete\n");
-
-    test_sve_int_bin_pred_log(dcontext);
-    print("test_sve_int_bin_pred_log complete\n");
 
     test_asimddiff(dcontext);
     print("test_asimddiff complete\n");
@@ -7228,6 +7118,8 @@ main(int argc, char *argv[])
     ld4r(dcontext);
 
     test_internal_encode(dcontext);
+
+    test_vector_length(dcontext);
 
     print("All tests complete\n");
 #ifndef STANDALONE_DECODER

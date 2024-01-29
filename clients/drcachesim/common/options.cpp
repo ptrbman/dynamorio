@@ -32,10 +32,25 @@
 
 /* shared options for both the frontend and the client */
 
+#include "options.h"
+
+#include <cstdint>
 #include <string>
+
 #include "dr_api.h" // For IF_X86_ELSE.
 #include "droption.h"
-#include "options.h"
+
+namespace dynamorio {
+namespace drmemtrace {
+
+using ::dynamorio::droption::bytesize_t;
+using ::dynamorio::droption::DROPTION_FLAG_ACCUMULATE;
+using ::dynamorio::droption::DROPTION_FLAG_INTERNAL;
+using ::dynamorio::droption::DROPTION_FLAG_SWEEP;
+using ::dynamorio::droption::DROPTION_SCOPE_ALL;
+using ::dynamorio::droption::DROPTION_SCOPE_CLIENT;
+using ::dynamorio::droption::DROPTION_SCOPE_FRONTEND;
+using ::dynamorio::droption::droption_t;
 
 droption_t<bool> op_offline(
     DROPTION_SCOPE_ALL, "offline", false, "Store trace files for offline analysis",
@@ -86,7 +101,8 @@ droption_t<int> op_jobs(
     "files is parallelized.  This option controls the number of concurrent jobs.  0 "
     "disables concurrency and uses a single thread to perform all operations.  A "
     "negative value sets the job count to the number of hardware threads, "
-    "with a cap of 16.");
+    "with a cap of 16.  This is ignored for -core_sharded where -cores sets the "
+    "parallelism.");
 
 droption_t<std::string> op_module_file(
     DROPTION_SCOPE_ALL, "module_file", "", "Path to modules.log for opcode_mix tool",
@@ -138,9 +154,10 @@ droption_t<std::string> op_funclist_file(
     "directory as the trace file, or a raw/ subdirectory below the trace file, this "
     "parameter can be omitted.");
 
-droption_t<unsigned int> op_num_cores(DROPTION_SCOPE_FRONTEND, "cores", 4,
-                                      "Number of cores",
-                                      "Specifies the number of cores to simulate.");
+droption_t<unsigned int> op_num_cores(
+    DROPTION_SCOPE_FRONTEND, "cores", 4, "Number of cores",
+    "Specifies the number of cores to simulate.  For -core_sharded, each core executes "
+    "in parallel in its own worker thread and -jobs is ignored.");
 
 droption_t<unsigned int> op_line_size(
     DROPTION_SCOPE_FRONTEND, "line_size", 64, "Cache line size",
@@ -206,8 +223,8 @@ droption_t<bool> op_L0I_filter(
     "cache.  This cache is direct-mapped with size equal to L0I_size.  It uses virtual "
     "addresses regardless of -use_physical. The dynamic (pre-filtered) per-thread "
     "instruction count is tracked and supplied via a "
-    "#TRACE_MARKER_TYPE_INSTRUCTION_COUNT marker at thread buffer boundaries and at "
-    "thread exit.");
+    "#dynamorio::drmemtrace::TRACE_MARKER_TYPE_INSTRUCTION_COUNT marker at thread "
+    "buffer boundaries and at thread exit.");
 
 droption_t<bool> op_L0D_filter(
     DROPTION_SCOPE_CLIENT, "L0D_filter", false,
@@ -246,11 +263,12 @@ droption_t<bool> op_use_physical(
     "If available, metadata with virtual-to-physical-address translation information "
     "is added to the trace.  This is not possible from user mode on all platforms.  "
     "The regular trace entries remain virtual, with a pair of markers of "
-    "types #TRACE_MARKER_TYPE_PHYSICAL_ADDRESS and #TRACE_MARKER_TYPE_VIRTUAL_ADDRESS "
+    "types #dynamorio::drmemtrace::TRACE_MARKER_TYPE_PHYSICAL_ADDRESS and "
+    "#dynamorio::drmemtrace::TRACE_MARKER_TYPE_VIRTUAL_ADDRESS "
     "inserted at some prior point for each new or changed page mapping to show the "
     "corresponding physical addresses.  If translation fails, a "
-    "#TRACE_MARKER_TYPE_PHYSICAL_ADDRESS_NOT_AVAILABLE is inserted. "
-    "This option may incur significant overhead "
+    "#dynamorio::drmemtrace::TRACE_MARKER_TYPE_PHYSICAL_ADDRESS_NOT_AVAILABLE is "
+    "inserted. This option may incur significant overhead "
     "both for the physical translation and as it requires disabling optimizations."
     "For -offline, this option must be passed to both the tracer (to insert the "
     "markers) and the simulator (to use the markers).");
@@ -271,8 +289,9 @@ droption_t<bool> op_cpu_scheduling(
     "round-robin fashion.  This option causes the scheduler to instead use the recorded "
     "cpu that each thread executed on (at a granularity of the trace buffer size) "
     "for scheduling, mapping traced cpu's to cores and running each segment of each "
-    "thread "
-    "on the core that owns the recorded cpu for that segment.");
+    "thread on the core that owns the recorded cpu for that segment. "
+    "This option is not supported with -core_serial; use "
+    "-cpu_schedule_file with -core_serial instead.");
 
 droption_t<bytesize_t> op_max_trace_size(
     DROPTION_SCOPE_CLIENT, "max_trace_size", 0,
@@ -370,6 +389,17 @@ droption_t<std::string> op_raw_compress(
     "for an SSD, zlib and gzip typically add overhead and would only be used if space is "
     "at a premium; snappy_nocrc and lz4 are nearly always performance wins.");
 
+droption_t<std::string> op_trace_compress(
+    DROPTION_SCOPE_FRONTEND, "compress", DEFAULT_TRACE_COMPRESSION_TYPE,
+    "Trace compression: \"zip\",\"gzip\",\"zlib\",\"lz4\",\"none\"",
+    "Specifies the compression type to use for trace files: \"zip\", "
+    "\"gzip\", \"zlib\", \"lz4\", or \"none\". "
+    "In most cases where fast skipping by instruction count is not needed "
+    "lz4 compression generally improves performance and is recommended. "
+    "When it comes to storage types, the impact on overhead varies: "
+    "for SSDs, zip and gzip often increase overhead and should only be chosen "
+    "if space is limited.");
+
 droption_t<bool> op_online_instr_types(
     DROPTION_SCOPE_CLIENT, "online_instr_types", false,
     "Whether online traces should distinguish instr types",
@@ -434,8 +464,12 @@ droption_t<std::string>
                       ", " FUNC_VIEW ", " BASIC_COUNTS ", or " INVARIANT_CHECKER ").",
                       "Specifies the type of the simulator. "
                       "Supported types: " CPU_CACHE ", " MISS_ANALYZER ", " TLB
+                      "Specifies the types of simulators, separated by a colon (\":\").",
+                      "Predefined types: " CPU_CACHE ", " MISS_ANALYZER ", " TLB
                       ", " REUSE_DIST ", " REUSE_TIME ", " HISTOGRAM ", " BASIC_COUNTS
-                      ", or " INVARIANT_CHECKER ".");
+                      ", " INVARIANT_CHECKER ", or " SCHEDULE_STATS
+                      ". The external types: name of a tool identified by a "
+                      "name.drcachesim config file in the DR tools directory.");
 
 droption_t<unsigned int> op_verbose(DROPTION_SCOPE_ALL, "verbose", 0, 0, 64,
                                     "Verbosity level",
@@ -487,10 +521,17 @@ droption_t<std::string> op_tracer_ops(
     "(For internal use: sweeps up tracer options)",
     "This is an internal option that sweeps up other options to pass to the tracer.");
 
+droption_t<bytesize_t> op_interval_microseconds(
+    DROPTION_SCOPE_FRONTEND, "interval_microseconds", 0,
+    "Enable periodic heartbeats for intervals of given microseconds in the trace.",
+    "Desired length of each trace interval, defined in microseconds of trace time. "
+    "Trace intervals are measured using the TRACE_MARKER_TYPE_TIMESTAMP marker values. "
+    "If set, analysis tools receive a callback at the end of each interval.");
+
 droption_t<int>
     op_only_thread(DROPTION_SCOPE_FRONTEND, "only_thread", 0,
                    "Only analyze this thread (0 means all)",
-                   "For simulator types that support it, limits analyis to the single "
+                   "Limits analyis to the single "
                    "thread with the given identifier.  0 enables all threads.");
 
 droption_t<bytesize_t> op_skip_instrs(
@@ -509,6 +550,23 @@ droption_t<bytesize_t>
                  "application execution. These memory references are dropped instead "
                  "of being simulated.  This skipping may be slow for large skip values; "
                  "consider -skip_instrs for a faster method of skipping.");
+
+droption_t<bytesize_t> op_L0_filter_until_instrs(
+    DROPTION_SCOPE_CLIENT, "L0_filter_until_instrs", 0,
+    "Number of instructions for warmup trace",
+    "Specifies the number of instructions to run in warmup mode. This instruction count "
+    "is per-thread. In warmup mode, we "
+    "filter accesses through the -L0{D,I}_filter caches. If neither -L0D_filter nor "
+    "-L0I_filter are specified then both are assumed to be true. The size of these can "
+    "be specified using -L0{D,I}_size. The filter instructions come after the "
+    "-trace_after_instrs count and before the full trace. This is intended to be "
+    "used together with other trace options (e.g., -trace_for_instrs, "
+    "-exit_after_tracing, -max_trace_size etc.) but with the difference that a filter "
+    "trace is also collected. The filter trace and full trace are stored in a single "
+    "file separated by a TRACE_MARKER_TYPE_FILTER_ENDPOINT marker. When used with "
+    "windows (i.e., -retrace_every_instrs), each window contains a filter trace and a "
+    "full trace. Therefore TRACE_MARKER_TYPE_WINDOW_ID markers indicate start of "
+    "filtered records.");
 
 droption_t<bytesize_t> op_warmup_refs(
     DROPTION_SCOPE_FRONTEND, "warmup_refs", 0,
@@ -533,15 +591,16 @@ droption_t<bytesize_t>
                 "and the references following the simulated ones are dropped.");
 
 droption_t<std::string>
-    op_view_syntax(DROPTION_SCOPE_FRONTEND, "view_syntax", "att/arm/dr",
+    op_view_syntax(DROPTION_SCOPE_FRONTEND, "view_syntax", "att/arm/dr/riscv",
                    "Syntax to use for disassembly.",
                    "Specifies the syntax to use when viewing disassembled offline traces."
                    // TODO i#4382: Add aarch64 syntax support.
                    " The option can be set to one of \"att\" (AT&T style), \"intel\""
                    " (Intel style), \"dr\" (DynamoRIO's native style with all implicit"
-                   " operands listed), and \"arm\" (32-bit ARM style). An invalid"
-                   " specification falls back to the default, which is \"att\" for x86,"
-                   " \"arm\" for ARM (32-bit), and \"dr\" for AArch64.");
+                   " operands listed), \"arm\" (32-bit ARM style), and \"riscv\" (RISC-V "
+                   "style). An invalid specification falls back to the default, which is "
+                   "\"att\" for x86, \"arm\" for ARM (32-bit), \"dr\" for AArch64, "
+                   "and \"riscv\" for RISC-V.");
 
 droption_t<std::string>
     op_config_file(DROPTION_SCOPE_FRONTEND, "config_file", "",
@@ -638,12 +697,18 @@ droption_t<bool> op_record_heap(
     " -record_function [heap_functions], where [heap_functions] is"
     " the value in -record_heap_value.");
 droption_t<std::string> op_record_heap_value(
+    // There are other, more obscure variants, like pvalloc, valloc, memalign,
+    // posix_memalign, independent_calloc, plus malloc_zone_* on Mac and
+    // *_impl versions on Windows.  We ignore these for now.
     DROPTION_SCOPE_CLIENT, "record_heap_value", DROPTION_FLAG_ACCUMULATE,
     OP_RECORD_FUNC_ITEM_SEP,
     "malloc|1" OP_RECORD_FUNC_ITEM_SEP "free|1|noret" OP_RECORD_FUNC_ITEM_SEP
+    "realloc|2" OP_RECORD_FUNC_ITEM_SEP "calloc|2" OP_RECORD_FUNC_ITEM_SEP
     "tc_malloc|1" OP_RECORD_FUNC_ITEM_SEP "tc_free|1|noret" OP_RECORD_FUNC_ITEM_SEP
+    "tc_realloc|2" OP_RECORD_FUNC_ITEM_SEP "tc_calloc|2" OP_RECORD_FUNC_ITEM_SEP
     "__libc_malloc|1" OP_RECORD_FUNC_ITEM_SEP
-    "__libc_free|1|noret" OP_RECORD_FUNC_ITEM_SEP "calloc|2"
+    "__libc_free|1|noret" OP_RECORD_FUNC_ITEM_SEP
+    "__libc_realloc|2" OP_RECORD_FUNC_ITEM_SEP "__libc_calloc|2"
 #ifdef UNIX
     // i#3048: We only have Itanium ABI manglings for now so we disable for MSVC.
     // XXX: This is getting quite long.  I would change the option to point at
@@ -690,6 +755,24 @@ droption_t<bool> op_record_replace_retaddr(
     "replacement, which has lower overhead, but runs the risk of breaking an "
     "application that examines or changes its own return addresses in the recorded "
     "functions.");
+droption_t<std::string> op_record_syscall(
+    DROPTION_SCOPE_CLIENT, "record_syscall", DROPTION_FLAG_ACCUMULATE,
+    OP_RECORD_FUNC_ITEM_SEP, "", "Record parameters for the specified syscall number(s).",
+    "Record the parameters and success of the specified system call number(s)."
+    " The option value should fit this format:"
+    " sycsall_number|parameter_number"
+    " E.g., -record_syscall \"2|2\" will record SYS_open's 2 parameters and whether"
+    " successful (1 for success or 0 for failure, in a function return value record)"
+    " for x86 Linux.  SYS_futex is recorded by default on Linux and this option's value"
+    " adds to futex rather than replacing it (setting futex to 0 parameters disables)."
+    " The trace identifies which syscall owns each set of parameter and return value"
+    " records via a numeric ID equal to the syscall number + TRACE_FUNC_ID_SYSCALL_BASE."
+    " Recording multiple syscalls can be achieved by using the separator"
+    " \"" OP_RECORD_FUNC_ITEM_SEP
+    "\" (e.g., -record_syscall \"202|6" OP_RECORD_FUNC_ITEM_SEP "3|1\"), or"
+    " specifying multiple -record_syscall options."
+    " It is up to the user to ensure the values are correct; a too-large parameter"
+    " count may cause tracing to fail with an error mid-run.");
 droption_t<unsigned int> op_miss_count_threshold(
     DROPTION_SCOPE_FRONTEND, "miss_count_threshold", 50000,
     "For cache miss analysis: minimum LLC miss count for a load to be eligible for "
@@ -724,3 +807,113 @@ droption_t<bool> op_enable_kernel_tracing(
     "analysis. And this feature is available only on Intel CPUs that support Intel@ "
     "Processor Trace.");
 #endif
+
+// Core-oriented analysis.
+droption_t<bool> op_core_sharded(
+    DROPTION_SCOPE_ALL, "core_sharded", false, "Analyze per-core in parallel.",
+    "By default, the input trace is analyzed in parallel across shards equal to "
+    "software threads.  This option instead schedules those threads onto virtual cores "
+    "and analyzes each core in parallel.  Thus, each shard consists of pieces from "
+    "many software threads.  How the scheduling is performed is controlled by a set "
+    "of options with the prefix \"sched_\" along with -cores.");
+
+droption_t<bool> op_core_serial(
+    DROPTION_SCOPE_ALL, "core_serial", false, "Analyze per-core in serial.",
+    "In this mode, scheduling is performed just like for -core_sharded. "
+    "However, the resulting schedule is acted upon by a single analysis thread"
+    "which walks the N cores in lockstep in round robin fashion. "
+    "How the scheduling is performed is controlled by a set "
+    "of options with the prefix \"sched_\" along with -cores.");
+
+droption_t<int64_t>
+    op_sched_quantum(DROPTION_SCOPE_ALL, "sched_quantum", 1 * 1000 * 1000,
+                     "Scheduling quantum",
+                     "Applies to -core_sharded and -core_serial. "
+                     "Scheduling quantum: in microseconds of wall-clock "
+                     "time if -sched_time is set; otherwise in instructions.");
+
+droption_t<bool>
+    op_sched_time(DROPTION_SCOPE_ALL, "sched_time", false,
+                  "Whether to use time for the scheduling quantum",
+                  "Applies to -core_sharded and -core_serial. "
+                  "Whether to use wall-clock time for the scheduling quantum, with a "
+                  "value equal to -sched_quantum in microseconds of wall-clock time.");
+
+droption_t<bool> op_sched_order_time(DROPTION_SCOPE_ALL, "sched_order_time", true,
+                                     "Whether to honor recorded timestamps for ordering",
+                                     "Applies to -core_sharded and -core_serial. "
+                                     "Whether to honor recorded timestamps for ordering");
+
+droption_t<uint64_t> op_sched_syscall_switch_us(
+    DROPTION_SCOPE_ALL, "sched_syscall_switch_us", 500,
+    "Minimum latency to consider any syscall as incurring a context switch.",
+    "Minimum latency in timestamp units (us) to consider any syscall as incurring "
+    "a context switch.  Applies to -core_sharded and -core_serial. ");
+
+droption_t<uint64_t> op_sched_blocking_switch_us(
+    DROPTION_SCOPE_ALL, "sched_blocking_switch_us", 100,
+    "Minimum latency to consider a maybe-blocking syscall as incurring a context switch.",
+    "Minimum latency in timestamp units (us) to consider any syscall that is marked as "
+    "maybe-blocking to incur a context switch. Applies to -core_sharded and "
+    "-core_serial. ");
+
+droption_t<double> op_sched_block_scale(
+    DROPTION_SCOPE_ALL, "sched_block_scale", 1000., "Input block time scale factor",
+    "The scale applied to the microsecond latency of blocking system calls.  A higher "
+    "value here results in blocking syscalls keeping inputs unscheduled for longer.  "
+    "This should roughly equal the slowdown of instruction record processing versus the "
+    "original (untraced) application execution.");
+
+// We have a max to avoid outlier latencies that are already a second or more from
+// scaling up to tens of minutes.  We assume a cap is representative as the outliers
+// likely were not part of key dependence chains.  Without a cap the other threads all
+// finish and the simulation waits for tens of minutes further for a couple of outliers.
+// The cap remains a flag and not a constant as different length traces and different
+// speed simulators need different idle time ranges, so we need to be able to tune this
+// to achieve desired cpu usage targets.  The default value was selected while tuning
+// a 1-minute-long schedule_stats run on a 112-core 500-thread large application
+// to produce good cpu usage without unduly increasing tool runtime.
+droption_t<uint64_t> op_sched_block_max_us(DROPTION_SCOPE_ALL, "sched_block_max_us",
+                                           25000000,
+                                           "Maximum blocked input time, in microseconds",
+                                           "The maximum blocked time, after scaling with "
+                                           "-sched_block_scale.");
+#ifdef HAS_ZIP
+droption_t<std::string> op_record_file(DROPTION_SCOPE_FRONTEND, "record_file", "",
+                                       "Path for storing record of schedule",
+                                       "Applies to -core_sharded and -core_serial. "
+                                       "Path for storing record of schedule.");
+
+droption_t<std::string> op_replay_file(DROPTION_SCOPE_FRONTEND, "replay_file", "",
+                                       "Path with stored schedule for replay",
+                                       "Applies to -core_sharded and -core_serial. "
+                                       "Path with stored schedule for replay.");
+droption_t<std::string>
+    op_cpu_schedule_file(DROPTION_SCOPE_FRONTEND, "cpu_schedule_file", "",
+                         "Path with stored as-traced schedule for replay",
+                         "Applies to -core_sharded and -core_serial. "
+                         "Path with stored as-traced schedule for replay.");
+#endif
+droption_t<std::string> op_sched_switch_file(
+    DROPTION_SCOPE_FRONTEND, "sched_switch_file", "",
+    "Path to file holding context switch sequences",
+    "Applies to -core_sharded and -core_serial.  Path to file holding context switch "
+    "sequences.  The file can contain multiple sequences each with regular trace headers "
+    "and the sequence proper bracketed by TRACE_MARKER_TYPE_CONTEXT_SWITCH_START and "
+    "TRACE_MARKER_TYPE_CONTEXT_SWITCH_END markers.");
+
+// Schedule_stats options.
+droption_t<uint64_t>
+    op_schedule_stats_print_every(DROPTION_SCOPE_ALL, "schedule_stats_print_every",
+                                  500000, "A letter is printed every N instrs",
+                                  "A letter is printed every N instrs or N waits");
+
+droption_t<std::string> op_syscall_template_file(
+    DROPTION_SCOPE_FRONTEND, "syscall_template_file", "",
+    "Path to the file that contains system call trace templates.",
+    "Path to the file that contains system call trace templates. "
+    "If set, system call traces will be injected from the file "
+    "into the resulting trace.");
+
+} // namespace drmemtrace
+} // namespace dynamorio

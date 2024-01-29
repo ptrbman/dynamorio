@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2023 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2024 Google, Inc.  All rights reserved.
  * Copyright (c) 2007-2008 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -914,7 +914,8 @@ test_cti_prefixes(void *dc)
 }
 
 static void
-test_cti_predicate(void *dc, byte *data, uint len, int opcode, dr_pred_type_t pred)
+test_predicate(void *dc, byte *data, uint len, int opcode, dr_pred_type_t pred,
+               uint eflags)
 {
     instr_t *instr = instr_create(dc);
     byte *end = decode(dc, data, instr);
@@ -922,6 +923,7 @@ test_cti_predicate(void *dc, byte *data, uint len, int opcode, dr_pred_type_t pr
     ASSERT(instr_get_opcode(instr) == opcode);
     ASSERT(instr_is_predicated(instr));
     ASSERT(instr_get_predicate(instr) == pred);
+    ASSERT(instr_get_opcode_eflags(opcode) == eflags);
     instr_destroy(dc, instr);
 }
 
@@ -936,9 +938,32 @@ test_cti_predicates(void *dc)
         // 0f 44 c2             cmovbe %edx,%eax
         { 0x0f, 0x46, 0xc2 },
     };
-    test_cti_predicate(dc, data[0], 2, OP_jle_short, DR_PRED_LE);
-    test_cti_predicate(dc, data[1], 6, OP_je, DR_PRED_EQ);
-    test_cti_predicate(dc, data[2], 3, OP_cmovbe, DR_PRED_BE);
+    test_predicate(dc, data[0], 2, OP_jle_short, DR_PRED_LE,
+                   EFLAGS_READ_SF | EFLAGS_READ_OF | EFLAGS_READ_ZF);
+    test_predicate(dc, data[1], 6, OP_je, DR_PRED_EQ, EFLAGS_READ_ZF);
+    test_predicate(dc, data[2], 3, OP_cmovbe, DR_PRED_BE,
+                   EFLAGS_READ_CF | EFLAGS_READ_ZF);
+}
+
+static void
+test_rep_predicates(void *dc)
+{
+    byte data[][16] = {
+        // f3 6c                rep ins
+        { 0xf3, 0x6c },
+        // f3 a4                rep movs
+        { 0xf3, 0xa4 },
+        // f3 a6                rep cmps
+        { 0xf3, 0xa6 },
+        // f2 af                repne scas
+        { 0xf2, 0xaf },
+    };
+    test_predicate(dc, data[0], 2, OP_rep_ins, DR_PRED_COMPLEX, EFLAGS_READ_DF);
+    test_predicate(dc, data[1], 2, OP_rep_movs, DR_PRED_COMPLEX, EFLAGS_READ_DF);
+    test_predicate(dc, data[2], 2, OP_rep_cmps, DR_PRED_COMPLEX,
+                   EFLAGS_WRITE_6 | EFLAGS_READ_DF | EFLAGS_READ_ZF);
+    test_predicate(dc, data[3], 2, OP_repne_scas, DR_PRED_COMPLEX,
+                   EFLAGS_WRITE_6 | EFLAGS_READ_DF | EFLAGS_READ_ZF);
 }
 
 static void
@@ -1544,6 +1569,23 @@ test_x64_vmovq(void *dc)
                               false /*no bytes*/, dbuf, BUFFER_SIZE_ELEMENTS(dbuf), &len);
     ASSERT(pc == &b2[7]);
     ASSERT(strcmp(dbuf, "vmovq  (%rdx,%rcx)[8byte] -> %xmm25\n") == 0);
+
+    const byte expected1[] = { 0x62, 0xc1, 0xfe, 0x08, 0x7e, 0x45, 0x00 };
+    const byte expected2[] = { 0x62, 0xc1, 0xfd, 0x08, 0xd6, 0x45, 0x00 };
+
+    instr_t *instr =
+        INSTR_CREATE_vmovq(dc, opnd_create_reg(DR_REG_XMM16),
+                           opnd_create_base_disp_ex(DR_REG_R13, DR_REG_NULL, 0, 0, OPSZ_8,
+                                                    true, false, false));
+    test_instr_encode(dc, instr, 7);
+    ASSERT(!memcmp(expected1, buf, 7));
+
+    instr = INSTR_CREATE_vmovq(dc,
+                               opnd_create_base_disp_ex(DR_REG_R13, DR_REG_NULL, 0, 0,
+                                                        OPSZ_8, true, false, false),
+                               opnd_create_reg_partial(DR_REG_XMM16, OPSZ_8));
+    test_instr_encode(dc, instr, 7);
+    ASSERT(!memcmp(expected2, buf, 7));
 }
 #endif
 
@@ -2712,7 +2754,7 @@ test_evex_compressed_disp_with_segment_prefix(void *dc)
 {
 #ifdef X64
     byte *pc;
-    const byte b[] = { 0x2e, 0x67, 0x62, 0x01, 0xc5, 0x00, 0xc4, 0x62, 0x21, 0x00 };
+    const byte b[] = { 0x65, 0x67, 0x62, 0x01, 0xc5, 0x00, 0xc4, 0x62, 0x21, 0x00 };
     char dbuf[512];
     int len;
 
@@ -2723,7 +2765,7 @@ test_evex_compressed_disp_with_segment_prefix(void *dc)
     ASSERT(
         strcmp(
             dbuf,
-            "addr32 vpinsrw %xmm23[14byte] %cs:0x42(%r10d)[2byte] $0x00 -> %xmm28\n") ==
+            "addr32 vpinsrw %xmm23[14byte] %gs:0x42(%r10d)[2byte] $0x00 -> %xmm28\n") ==
         0);
 #endif
 }
@@ -2731,12 +2773,12 @@ test_evex_compressed_disp_with_segment_prefix(void *dc)
 static void
 test_extra_leading_prefixes(void *dc)
 {
-#ifdef X64
     byte *pc;
-    const byte b1[] = { 0xf3, 0xf2, 0x4b, 0x0f, 0x70, 0x76, 0x00, 0xff };
-    const byte b2[] = { 0xf3, 0xf2, 0x0f, 0xbc, 0xf2 };
     char dbuf[512];
     int len;
+#ifdef X64
+    const byte b1[] = { 0xf3, 0xf2, 0x4b, 0x0f, 0x70, 0x76, 0x00, 0xff };
+    const byte b2[] = { 0xf3, 0xf2, 0x0f, 0xbc, 0xf2 };
 
     pc =
         disassemble_to_buffer(dc, (byte *)b1, (byte *)b1, false /*no pc*/,
@@ -2749,6 +2791,38 @@ test_extra_leading_prefixes(void *dc)
                               false /*no bytes*/, dbuf, BUFFER_SIZE_ELEMENTS(dbuf), &len);
     ASSERT(pc == &b2[0] + sizeof(b2));
     ASSERT(strcmp(dbuf, "bsf    %edx -> %esi\n") == 0);
+#endif
+
+    /* Only FS/GS prefixes are accepted on x64, so different prefixes "win" here */
+    const byte b3[] = { 0x26, 0x26, 0x26, 0x26, 0x26, 0x26, 0x26, 0x64,
+                        0x26, 0x26, 0x26, 0x26, 0x13, 0x04, 0x0a };
+    pc =
+        disassemble_to_buffer(dc, (byte *)b3, (byte *)b3, false /*no pc*/,
+                              false /*no bytes*/, dbuf, BUFFER_SIZE_ELEMENTS(dbuf), &len);
+    ASSERT(pc == &b3[0] + sizeof(b3));
+#ifdef X64
+    ASSERT(strcmp(dbuf, "adc    %fs:(%rdx,%rcx)[4byte] %eax -> %eax\n") == 0);
+#else
+    ASSERT(strcmp(dbuf, "adc    %es:(%edx,%ecx)[4byte] %eax -> %eax\n") == 0);
+#endif
+}
+
+static void
+test_ud1_operands(void *dc)
+{
+    byte *pc;
+    char dbuf[512];
+    int len;
+
+    const byte b[] = { 0x67, 0x0f, 0xb9, 0x40, 0x16 };
+    pc =
+        disassemble_to_buffer(dc, (byte *)b, (byte *)b, false /*no pc*/,
+                              false /*no bytes*/, dbuf, BUFFER_SIZE_ELEMENTS(dbuf), &len);
+    ASSERT(pc == &b[0] + sizeof(b));
+#ifdef X64
+    ASSERT(strcmp(dbuf, "addr32 ud1    %eax 0x16(%eax)[4byte]\n") == 0);
+#else
+    ASSERT(strcmp(dbuf, "addr16 ud1    %eax 0x16(%bx,%si)[4byte]\n") == 0);
 #endif
 }
 
@@ -2796,6 +2870,8 @@ main(int argc, char *argv[])
 #else
     void *dcontext = dr_standalone_init();
 
+    ASSERT(!dr_running_under_dynamorio());
+
     /* simple test of deadlock_avoidance, etc. being disabled in standalone */
     void *x = dr_mutex_create();
     dr_mutex_lock(x);
@@ -2820,6 +2896,8 @@ main(int argc, char *argv[])
     test_cti_prefixes(dcontext);
 
     test_cti_predicates(dcontext);
+
+    test_rep_predicates(dcontext);
 
 #ifndef X64
     test_modrm16(dcontext);
@@ -2878,6 +2956,8 @@ main(int argc, char *argv[])
     test_evex_compressed_disp_with_segment_prefix(dcontext);
 
     test_extra_leading_prefixes(dcontext);
+
+    test_ud1_operands(dcontext);
 
     test_disasm_to_buffer(dcontext);
 

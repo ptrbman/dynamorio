@@ -71,7 +71,7 @@ at_bb(app_pc bb_addr)
 
 static size_t
 event_persist_ro_size(void *drcontext, void *perscxt, size_t file_offs,
-                      void **user_data OUT)
+                      void **user_data DR_PARAM_OUT)
 {
     return sizeof(mybase) +
         hashtable_persist_size(drcontext, &sample_pointer_table, sizeof(size_t), perscxt,
@@ -116,7 +116,7 @@ event_persist_ro(void *drcontext, void *perscxt, file_t fd, void *user_data)
 }
 
 static bool
-event_resurrect_ro(void *drcontext, void *perscxt, byte **map INOUT)
+event_resurrect_ro(void *drcontext, void *perscxt, byte **map DR_PARAM_OUT)
 {
     bool ok = true;
     uint i;
@@ -193,7 +193,7 @@ event_bb(void *drcontext, void *tag, instrlist_t *bb, bool for_trace, bool trans
             inst = instr_get_prev(inst);
         instrlist_meta_preinsert(bb, inst,
                                  INSTR_CREATE_jmp(drcontext, opnd_create_instr(skip)));
-        instrlist_meta_preinsert(bb, inst, INSTR_CREATE_ud2a(drcontext));
+        instrlist_meta_preinsert(bb, inst, INSTR_CREATE_ud2(drcontext));
         instrlist_meta_preinsert(bb, inst, skip);
     }
 

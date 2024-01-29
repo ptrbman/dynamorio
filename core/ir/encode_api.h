@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2010-2021 Google, Inc.  All rights reserved.
+ * Copyright (c) 2010-2024 Google, Inc.  All rights reserved.
  * Copyright (c) 2002-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -62,7 +62,8 @@ DR_API
  * mis-interpreting application code.
  */
 bool
-dr_set_isa_mode(void *drcontext, dr_isa_mode_t new_mode, dr_isa_mode_t *old_mode OUT);
+dr_set_isa_mode(void *drcontext, dr_isa_mode_t new_mode,
+                dr_isa_mode_t *old_mode DR_PARAM_OUT);
 
 DR_API
 /**
@@ -73,20 +74,23 @@ DR_API
 dr_isa_mode_t
 dr_get_isa_mode(void *drcontext);
 
+DR_API
 /**
  * AArch64 Scalable Vector Extension's vector length in bits is one of:
  * 128 256 384 512 640 768 896 1024 1152 1280 1408 1536 1664 1792 1920 2048
+ * Returns whether successful.
  * TODO i#3044: This function will only allow setting vector length if not
  * running on SVE.
  */
-void
-dr_set_sve_vl(int vl);
+bool
+dr_set_sve_vector_length(int vl);
 
+DR_API
 /**
  * Read AArch64 Scalable Vector Extension's vector length, in bits.
  */
 int
-dr_get_sve_vl(void);
+dr_get_sve_vector_length(void);
 
 enum {
 #ifdef X86
@@ -132,7 +136,7 @@ DR_API
  * Encodes \p instr into the memory at \p pc.
  * Uses the x86/x64 mode stored in instr, not the mode of the current thread.
  * Returns the pc after the encoded instr, or NULL if the encoding failed.
- * If instr is a cti with an instr_t target, the note fields of instr and
+ * If instr is a cti with an instr_t target, the offset fields of instr and
  * of the target must be set with the respective offsets of each instr_t!
  * (instrlist_encode does this automatically, if the target is in the list).
  * x86 instructions can occupy up to 17 bytes, so the caller should ensure
@@ -154,7 +158,7 @@ DR_API
  *
  * Uses the x86/x64 mode stored in instr, not the mode of the current thread.
  * Returns the pc after the encoded instr, or NULL if the encoding failed.
- * If instr is a cti with an instr_t target, the note fields of instr and
+ * If instr is a cti with an instr_t target, the offset fields of instr and
  * of the target must be set with the respective offsets of each instr_t!
  * (instrlist_encode does this automatically, if the target is in the list).
  * x86 instructions can occupy up to 17 bytes, so the caller should ensure
@@ -175,8 +179,8 @@ DR_API
  * Uses the x86/x64 mode stored in each instr, not the mode of the current thread.
  * In order for instr_t operands to be encoded properly,
  * \p has_instr_jmp_targets must be true.  If \p has_instr_jmp_targets is true,
- * the note field of each instr_t in ilist will be overwritten, and if any
- * instr_t targets are not in \p ilist, they must have their note fields set with
+ * the offset field of each instr_t in ilist will be overwritten, and if any
+ * instr_t targets are not in \p ilist, they must have their offset fields set with
  * their offsets relative to pc.
  * x86 instructions can occupy up to 17 bytes each, so the caller should ensure
  * the target location has enough room to avoid overflow.
@@ -200,8 +204,8 @@ DR_API
  *
  * In order for instr_t operands to be encoded properly,
  * \p has_instr_jmp_targets must be true.  If \p has_instr_jmp_targets is true,
- * the note field of each instr_t in ilist will be overwritten, and if any
- * instr_t targets are not in \p ilist, they must have their note fields set with
+ * the offset field of each instr_t in ilist will be overwritten, and if any
+ * instr_t targets are not in \p ilist, they must have their offset fields set with
  * their offsets relative to pc.
  *
  * If \p max_pc is non-NULL, computes the total size required to encode the

@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2002-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -497,10 +497,10 @@
 #define INSTR_CREATE_clts(dc) instr_create_0dst_0src((dc), OP_clts)
 #define INSTR_CREATE_invd(dc) instr_create_0dst_0src((dc), OP_invd)
 #define INSTR_CREATE_wbinvd(dc) instr_create_0dst_0src((dc), OP_wbinvd)
-#define INSTR_CREATE_ud2a(dc) instr_create_0dst_0src((dc), OP_ud2a)
+#define INSTR_CREATE_ud2(dc) instr_create_0dst_0src((dc), OP_ud2)
+#define INSTR_CREATE_ud2a(dc) INSTR_CREATE_ud2((dc))
 #define INSTR_CREATE_emms(dc) instr_create_0dst_0src((dc), OP_emms)
 #define INSTR_CREATE_rsm(dc) instr_create_0dst_0src((dc), OP_rsm)
-#define INSTR_CREATE_ud2b(dc) instr_create_0dst_0src((dc), OP_ud2b)
 #define INSTR_CREATE_lfence(dc) instr_create_0dst_0src((dc), OP_lfence)
 #define INSTR_CREATE_mfence(dc) instr_create_0dst_0src((dc), OP_mfence)
 #define INSTR_CREATE_sfence(dc) instr_create_0dst_0src((dc), OP_sfence)
@@ -527,6 +527,8 @@
 #define INSTR_CREATE_vzeroupper(dc) instr_create_0dst_0src((dc), OP_vzeroupper)
 #define INSTR_CREATE_vzeroall(dc) instr_create_0dst_0src((dc), OP_vzeroall)
 #define INSTR_CREATE_xtest(dc) instr_create_0dst_0src((dc), OP_xtest)
+#define INSTR_CREATE_clac(dc) instr_create_0dst_0src((dc), OP_clac)
+#define INSTR_CREATE_stac(dc) instr_create_0dst_0src((dc), OP_stac)
 /** @} */ /* end doxygen group */
 
 /* no destination, 1 source */
@@ -766,6 +768,8 @@
 #define INSTR_CREATE_cmp(dc, s1, s2) instr_create_0dst_2src((dc), OP_cmp, (s1), (s2))
 #define INSTR_CREATE_test(dc, s1, s2) instr_create_0dst_2src((dc), OP_test, (s1), (s2))
 #define INSTR_CREATE_ptest(dc, s1, s2) instr_create_0dst_2src((dc), OP_ptest, (s1), (s2))
+#define INSTR_CREATE_ud1(dc, s1, s2) instr_create_0dst_2src((dc), OP_ud1, (s1), (s2))
+#define INSTR_CREATE_ud2b(dc, s1, s2) INSTR_CREATE_ud1((dc), (s1), (s2))
 /* AVX */
 #define INSTR_CREATE_vucomiss(dc, s1, s2) \
     instr_create_0dst_2src((dc), OP_vucomiss, (s1), (s2))
@@ -962,6 +966,10 @@
 #define INSTR_CREATE_xrstor32(dc, s)                                            \
     instr_create_0dst_3src((dc), OP_xrstor32, (s), opnd_create_reg(DR_REG_EDX), \
                            opnd_create_reg(DR_REG_EAX))
+#define INSTR_CREATE_xrstors32(dc, s)                                            \
+    instr_create_0dst_3src((dc), OP_xrstors32, (s), opnd_create_reg(DR_REG_EDX), \
+                           opnd_create_reg(DR_REG_EAX))
+
 /**
  * This INSTR_CREATE_xxx macro creates an instr_t with opcode OP_xxx, automatically
  * supplying any implicit operands.
@@ -971,6 +979,9 @@
  */
 #define INSTR_CREATE_xrstor64(dc, s)                                            \
     instr_create_0dst_3src((dc), OP_xrstor64, (s), opnd_create_reg(DR_REG_EDX), \
+                           opnd_create_reg(DR_REG_EAX))
+#define INSTR_CREATE_xrstors64(dc, s)                                            \
+    instr_create_0dst_3src((dc), OP_xrstors64, (s), opnd_create_reg(DR_REG_EDX), \
                            opnd_create_reg(DR_REG_EAX))
 /** @} */ /* end doxygen group */
 
@@ -2669,6 +2680,11 @@
 /* AVX512 BF16 */
 #define INSTR_CREATE_vcvtneps2bf16_mask(dc, d, k, s) \
     instr_create_1dst_2src((dc), OP_vcvtneps2bf16, (d), (k), (s))
+/* AVX512 VPOPCNTDQ */
+#define INSTR_CREATE_vpopcntd_mask(dc, d, k, s) \
+    instr_create_1dst_2src((dc), OP_vpopcntd, (d), (k), (s))
+#define INSTR_CREATE_vpopcntq_mask(dc, d, k, s) \
+    instr_create_1dst_2src((dc), OP_vpopcntq, (d), (k), (s))
 
 /** @} */ /* end doxygen group */
 
@@ -3241,8 +3257,14 @@
 #define INSTR_CREATE_xsave32(dc, d)                                            \
     instr_create_1dst_2src((dc), OP_xsave32, (d), opnd_create_reg(DR_REG_EDX), \
                            opnd_create_reg(DR_REG_EAX))
+#define INSTR_CREATE_xsaves32(dc, d)                                            \
+    instr_create_1dst_2src((dc), OP_xsaves32, (d), opnd_create_reg(DR_REG_EDX), \
+                           opnd_create_reg(DR_REG_EAX))
 #define INSTR_CREATE_xsave64(dc, d)                                            \
     instr_create_1dst_2src((dc), OP_xsave64, (d), opnd_create_reg(DR_REG_EDX), \
+                           opnd_create_reg(DR_REG_EAX))
+#define INSTR_CREATE_xsaves64(dc, d)                                            \
+    instr_create_1dst_2src((dc), OP_xsaves64, (d), opnd_create_reg(DR_REG_EDX), \
                            opnd_create_reg(DR_REG_EAX))
 #define INSTR_CREATE_xsaveopt32(dc, d)                                            \
     instr_create_1dst_2src((dc), OP_xsaveopt32, (d), opnd_create_reg(DR_REG_EDX), \
@@ -4758,65 +4780,81 @@
                            opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, \
                                                      0, 0, OPSZ_4_rex8_short2),          \
                            opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI))
-#define INSTR_CREATE_rep_ins_1(dc)                                                   \
-    instr_create_3dst_3src(                                                          \
-        (dc), OP_rep_ins,                                                            \
-        opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
-        opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),                    \
-        opnd_create_reg(DR_REG_DX), opnd_create_reg(DR_REG_XDI),                     \
-        opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_ins_4(dc)                                                       \
-    instr_create_3dst_3src((dc), OP_rep_ins,                                             \
-                           opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),     \
-                           opnd_create_reg(DR_REG_DX), opnd_create_reg(DR_REG_XDI),      \
-                           opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_stos_1(dc)                                                  \
-    instr_create_3dst_3src(                                                          \
-        (dc), OP_rep_stos,                                                           \
-        opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
-        opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),                    \
-        opnd_create_reg(DR_REG_AL), opnd_create_reg(DR_REG_XDI),                     \
-        opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_stos_4(dc)                                                      \
-    instr_create_3dst_3src((dc), OP_rep_stos,                                            \
-                           opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),     \
-                           opnd_create_reg(DR_REG_EAX), opnd_create_reg(DR_REG_XDI),     \
-                           opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_lods_1(dc)                                                  \
-    instr_create_3dst_3src(                                                          \
-        (dc), OP_rep_lods, opnd_create_reg(DR_REG_AL), opnd_create_reg(DR_REG_XSI),  \
-        opnd_create_reg(DR_REG_XCX),                                                 \
-        opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1), \
-        opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_lods_4(dc)                                                      \
-    instr_create_3dst_3src((dc), OP_rep_lods, opnd_create_reg(DR_REG_EAX),               \
-                           opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XCX),     \
-                           opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_movs_1(dc)                                                  \
-    instr_create_4dst_4src(                                                          \
-        (dc), OP_rep_movs,                                                           \
-        opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
-        opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),                    \
-        opnd_create_reg(DR_REG_XCX),                                                 \
-        opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1), \
-        opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),                    \
-        opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_movs_4(dc)                                                      \
-    instr_create_4dst_4src((dc), OP_rep_movs,                                            \
-                           opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),     \
-                           opnd_create_reg(DR_REG_XCX),                                  \
-                           opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),     \
-                           opnd_create_reg(DR_REG_XCX))
+#define INSTR_CREATE_rep_ins_1(dc)                                                       \
+    INSTR_PRED(                                                                          \
+        instr_create_3dst_3src(                                                          \
+            (dc), OP_rep_ins,                                                            \
+            opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),                    \
+            opnd_create_reg(DR_REG_DX), opnd_create_reg(DR_REG_XDI),                     \
+            opnd_create_reg(DR_REG_XCX)),                                                \
+        DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_ins_4(dc)                                                     \
+    INSTR_PRED(instr_create_3dst_3src(                                                 \
+                   (dc), OP_rep_ins,                                                   \
+                   opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),           \
+                   opnd_create_reg(DR_REG_DX), opnd_create_reg(DR_REG_XDI),            \
+                   opnd_create_reg(DR_REG_XCX)),                                       \
+               DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_stos_1(dc)                                                      \
+    INSTR_PRED(                                                                          \
+        instr_create_3dst_3src(                                                          \
+            (dc), OP_rep_stos,                                                           \
+            opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),                    \
+            opnd_create_reg(DR_REG_AL), opnd_create_reg(DR_REG_XDI),                     \
+            opnd_create_reg(DR_REG_XCX)),                                                \
+        DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_stos_4(dc)                                                    \
+    INSTR_PRED(instr_create_3dst_3src(                                                 \
+                   (dc), OP_rep_stos,                                                  \
+                   opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),           \
+                   opnd_create_reg(DR_REG_EAX), opnd_create_reg(DR_REG_XDI),           \
+                   opnd_create_reg(DR_REG_XCX)),                                       \
+               DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_lods_1(dc)                                                      \
+    INSTR_PRED(                                                                          \
+        instr_create_3dst_3src(                                                          \
+            (dc), OP_rep_lods, opnd_create_reg(DR_REG_AL), opnd_create_reg(DR_REG_XSI),  \
+            opnd_create_reg(DR_REG_XCX),                                                 \
+            opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XCX)),                   \
+        DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_lods_4(dc)                                                    \
+    INSTR_PRED(instr_create_3dst_3src(                                                 \
+                   (dc), OP_rep_lods, opnd_create_reg(DR_REG_EAX),                     \
+                   opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XCX),           \
+                   opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XCX)),          \
+               DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_movs_1(dc)                                                      \
+    INSTR_PRED(                                                                          \
+        instr_create_4dst_4src(                                                          \
+            (dc), OP_rep_movs,                                                           \
+            opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),                    \
+            opnd_create_reg(DR_REG_XCX),                                                 \
+            opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),                    \
+            opnd_create_reg(DR_REG_XCX)),                                                \
+        DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_movs_4(dc)                                                    \
+    INSTR_PRED(instr_create_4dst_4src(                                                 \
+                   (dc), OP_rep_movs,                                                  \
+                   opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),           \
+                   opnd_create_reg(DR_REG_XCX),                                        \
+                   opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),           \
+                   opnd_create_reg(DR_REG_XCX)),                                       \
+               DR_PRED_COMPLEX)
 #define INSTR_CREATE_outs_1(dc)                                                      \
     instr_create_1dst_3src(                                                          \
         (dc), OP_outs, opnd_create_reg(DR_REG_XSI),                                  \
@@ -4851,79 +4889,100 @@
                            opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, \
                                                      0, 0, OPSZ_4_rex8_short2),          \
                            opnd_create_reg(DR_REG_EAX), opnd_create_reg(DR_REG_XDI))
-#define INSTR_CREATE_rep_outs_1(dc)                                                  \
-    instr_create_2dst_4src(                                                          \
-        (dc), OP_rep_outs, opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XCX), \
-        opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1), \
-        opnd_create_reg(DR_REG_DX), opnd_create_reg(DR_REG_XSI),                     \
-        opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_outs_4(dc)                                                      \
-    instr_create_2dst_4src((dc), OP_rep_outs, opnd_create_reg(DR_REG_XSI),               \
-                           opnd_create_reg(DR_REG_XCX),                                  \
-                           opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_DX), opnd_create_reg(DR_REG_XSI),      \
-                           opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_cmps_1(dc)                                                  \
-    instr_create_3dst_5src(                                                          \
-        (dc), OP_rep_cmps, opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI), \
-        opnd_create_reg(DR_REG_XCX),                                                 \
-        opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1), \
-        opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
-        opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),                    \
-        opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_cmps_4(dc)                                                      \
-    instr_create_3dst_5src((dc), OP_rep_cmps, opnd_create_reg(DR_REG_XSI),               \
-                           opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),     \
-                           opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),     \
-                           opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_repne_cmps_1(dc)                                                  \
-    instr_create_3dst_5src(                                                            \
-        (dc), OP_repne_cmps, opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI), \
-        opnd_create_reg(DR_REG_XCX),                                                   \
-        opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1),   \
-        opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1),   \
-        opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),                      \
-        opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_repne_cmps_4(dc)                                                    \
-    instr_create_3dst_5src((dc), OP_repne_cmps, opnd_create_reg(DR_REG_XSI),             \
-                           opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),     \
-                           opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),     \
-                           opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_scas_1(dc)                                                  \
-    instr_create_2dst_4src(                                                          \
-        (dc), OP_rep_scas, opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX), \
-        opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
-        opnd_create_reg(DR_REG_AL), opnd_create_reg(DR_REG_XDI),                     \
-        opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_rep_scas_4(dc)                                                      \
-    instr_create_2dst_4src((dc), OP_rep_scas, opnd_create_reg(DR_REG_XDI),               \
-                           opnd_create_reg(DR_REG_XCX),                                  \
-                           opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_EAX), opnd_create_reg(DR_REG_XDI),     \
-                           opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_repne_scas_1(dc)                                                  \
-    instr_create_2dst_4src(                                                            \
-        (dc), OP_repne_scas, opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX), \
-        opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1),   \
-        opnd_create_reg(DR_REG_AL), opnd_create_reg(DR_REG_XDI),                       \
-        opnd_create_reg(DR_REG_XCX))
-#define INSTR_CREATE_repne_scas_4(dc)                                                    \
-    instr_create_2dst_4src((dc), OP_repne_scas, opnd_create_reg(DR_REG_XDI),             \
-                           opnd_create_reg(DR_REG_XCX),                                  \
-                           opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, \
-                                                     0, 0, OPSZ_4_rex8_short2),          \
-                           opnd_create_reg(DR_REG_EAX), opnd_create_reg(DR_REG_XDI),     \
-                           opnd_create_reg(DR_REG_XCX))
+#define INSTR_CREATE_rep_outs_1(dc)                                                      \
+    INSTR_PRED(                                                                          \
+        instr_create_2dst_4src(                                                          \
+            (dc), OP_rep_outs, opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XCX), \
+            opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_DX), opnd_create_reg(DR_REG_XSI),                     \
+            opnd_create_reg(DR_REG_XCX)),                                                \
+        DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_outs_4(dc)                                                    \
+    INSTR_PRED(instr_create_2dst_4src(                                                 \
+                   (dc), OP_rep_outs, opnd_create_reg(DR_REG_XSI),                     \
+                   opnd_create_reg(DR_REG_XCX),                                        \
+                   opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_DX), opnd_create_reg(DR_REG_XSI),            \
+                   opnd_create_reg(DR_REG_XCX)),                                       \
+               DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_cmps_1(dc)                                                      \
+    INSTR_PRED(                                                                          \
+        instr_create_3dst_5src(                                                          \
+            (dc), OP_rep_cmps, opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI), \
+            opnd_create_reg(DR_REG_XCX),                                                 \
+            opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),                    \
+            opnd_create_reg(DR_REG_XCX)),                                                \
+        DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_cmps_4(dc)                                                    \
+    INSTR_PRED(instr_create_3dst_5src(                                                 \
+                   (dc), OP_rep_cmps, opnd_create_reg(DR_REG_XSI),                     \
+                   opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),           \
+                   opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),           \
+                   opnd_create_reg(DR_REG_XCX)),                                       \
+               DR_PRED_COMPLEX)
+#define INSTR_CREATE_repne_cmps_1(dc)                                                    \
+    INSTR_PRED(                                                                          \
+        instr_create_3dst_5src(                                                          \
+            (dc), OP_repne_cmps, opnd_create_reg(DR_REG_XSI),                            \
+            opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),                    \
+            opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),                    \
+            opnd_create_reg(DR_REG_XCX)),                                                \
+        DR_PRED_COMPLEX)
+#define INSTR_CREATE_repne_cmps_4(dc)                                                  \
+    INSTR_PRED(instr_create_3dst_5src(                                                 \
+                   (dc), OP_repne_cmps, opnd_create_reg(DR_REG_XSI),                   \
+                   opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX),           \
+                   opnd_create_far_base_disp(DR_SEG_DS, DR_REG_XSI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_XSI), opnd_create_reg(DR_REG_XDI),           \
+                   opnd_create_reg(DR_REG_XCX)),                                       \
+               DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_scas_1(dc)                                                      \
+    INSTR_PRED(                                                                          \
+        instr_create_2dst_4src(                                                          \
+            (dc), OP_rep_scas, opnd_create_reg(DR_REG_XDI), opnd_create_reg(DR_REG_XCX), \
+            opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_AL), opnd_create_reg(DR_REG_XDI),                     \
+            opnd_create_reg(DR_REG_XCX)),                                                \
+        DR_PRED_COMPLEX)
+#define INSTR_CREATE_rep_scas_4(dc)                                                    \
+    INSTR_PRED(instr_create_2dst_4src(                                                 \
+                   (dc), OP_rep_scas, opnd_create_reg(DR_REG_XDI),                     \
+                   opnd_create_reg(DR_REG_XCX),                                        \
+                   opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_EAX), opnd_create_reg(DR_REG_XDI),           \
+                   opnd_create_reg(DR_REG_XCX)),                                       \
+               DR_PRED_COMPLEX)
+#define INSTR_CREATE_repne_scas_1(dc)                                                    \
+    INSTR_PRED(                                                                          \
+        instr_create_2dst_4src(                                                          \
+            (dc), OP_repne_scas, opnd_create_reg(DR_REG_XDI),                            \
+            opnd_create_reg(DR_REG_XCX),                                                 \
+            opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, OPSZ_1), \
+            opnd_create_reg(DR_REG_AL), opnd_create_reg(DR_REG_XDI),                     \
+            opnd_create_reg(DR_REG_XCX)),                                                \
+        DR_PRED_COMPLEX)
+#define INSTR_CREATE_repne_scas_4(dc)                                                  \
+    INSTR_PRED(instr_create_2dst_4src(                                                 \
+                   (dc), OP_repne_scas, opnd_create_reg(DR_REG_XDI),                   \
+                   opnd_create_reg(DR_REG_XCX),                                        \
+                   opnd_create_far_base_disp(DR_SEG_ES, DR_REG_XDI, DR_REG_NULL, 0, 0, \
+                                             OPSZ_4_rex8_short2),                      \
+                   opnd_create_reg(DR_REG_EAX), opnd_create_reg(DR_REG_XDI),           \
+                   opnd_create_reg(DR_REG_XCX)),                                       \
+               DR_PRED_COMPLEX)
 /** @} */ /* end doxygen group */
 
 /* floating point */

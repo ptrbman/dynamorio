@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2015-2020 Google, Inc.  All rights reserved.
+ * Copyright (c) 2015-2023 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -36,11 +36,17 @@
 #ifndef _TLB_SIMULATOR_H_
 #define _TLB_SIMULATOR_H_ 1
 
+#include <string>
 #include <unordered_map>
+
+#include "memref.h"
 #include "simulator.h"
+#include "tlb.h"
 #include "tlb_simulator_create.h"
 #include "tlb_stats.h"
-#include "tlb.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 class tlb_simulator_t : public simulator_t {
 public:
@@ -64,5 +70,8 @@ protected:
     tlb_t **dtlbs_;
     tlb_t **lltlbs_;
 };
+
+} // namespace drmemtrace
+} // namespace dynamorio
 
 #endif /* _TLB_SIMULATOR_H_ */

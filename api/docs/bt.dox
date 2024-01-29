@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2007-2009 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -382,7 +382,7 @@ execution time that affects efficiency.
 Through the basic block creation event, registered via
 dr_register_bb_event(), the client has the ability to inspect and transform
 any piece of code prior to its execution.  The client's hook receives
-three parameters:
+five parameters:
 
 \code
 dr_emit_flags_t new_block(void *drcontext, void *tag, instrlist_t *bb,
@@ -545,7 +545,7 @@ dr_emit_flags_t new_trace(void *drcontext, void *tag, instrlist_t *trace,
 
  - \c tag is a unique identifier for the trace fragment.
 
- - \c bb is a pointer to the list of instructions that comprise the
+ - \c trace is a pointer to the list of instructions that comprise the
    trace.  Clients can examine, manipulate, or completely replace the
    instructions in the list.
 
@@ -731,8 +731,9 @@ disassemble_from_copy(), and disassemble_to_buffer().
 
 The style of disassembly can be controlled through the
 \ref op_syntax_intel "-syntax_intel" (for Intel-style disassembly),
-\ref op_syntax_att "-syntax_att" (for AT&T-style disassembly), and
-\ref op_syntax_arm "-syntax_arm" (for ARM-style disassembly) runtime
+\ref op_syntax_att "-syntax_att" (for AT&T-style disassembly),
+\ref op_syntax_arm "-syntax_arm" (for ARM-style disassembly), and
+\ref op_syntax_riscv "-syntax_riscv" (for RISC-V-style disassembly) runtime
 options, or the disassemble_set_syntax() function.  The default disassembly
 style is DynamoRIO's custom style, which lists all operands (both implicit
 and explicit).  The sources are listed first, followed by "->", and then
@@ -1353,7 +1354,10 @@ This run-twice approach is subject to the following limitations:
   region whose values are then read afterward, must be general-purpose registers.
 - The instrumented execution of the rseq region may not perfectly reflect
   the native behavior of the application.  The instrumentation will never see
-  an abort anywhere but just prior to the committing store.
+  an abort anywhere but just prior to the committing store.  The native execution
+  might take a different conditional branch direction than the instrumented
+  execution, leading to discrepancies in recorded instruction sequences (drmemtrace
+  does try to fix these up in post-processing using the #DR_NOTE_RSEQ_ENTRY label).
   Additionally, memory addresses may be wrong if they are based on
   the live (as opposed to cached at the rseq region entrance) underlying cpuid
   and a migration occurred mid-region.  These are minor and
