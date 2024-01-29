@@ -278,9 +278,8 @@ configure_DynamoRIO_standalone(drcachesim)
 target_link_libraries(drcachesim drmemtrace_simulator drmemtrace_reuse_distance
   drmemtrace_histogram drmemtrace_reuse_time drmemtrace_basic_counts
   drmemtrace_opcode_mix drmemtrace_view drmemtrace_missing_instructions drmemtrace_func_view
-  drmemtrace_raw2trace directory_iterator drmemtrace_invariant_checker)
-  drmemtrace_opcode_mix drmemtrace_syscall_mix drmemtrace_view drmemtrace_func_view
   drmemtrace_raw2trace directory_iterator drmemtrace_invariant_checker
+   drmemtrace_syscall_mix  
   drmemtrace_schedule_stats)
 if (UNIX)
     target_link_libraries(drcachesim dl)
