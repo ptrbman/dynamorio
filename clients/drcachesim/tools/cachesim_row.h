@@ -132,4 +132,4 @@ cachesim_row::~cachesim_row()
 }
 } // namespace drmemtrace
 } // namespace dynamorio
-#endif /*_CACHE_SIMULATOR_ROW_H
+#endif /*_CACHE_SIMULATOR_ROW_H*/

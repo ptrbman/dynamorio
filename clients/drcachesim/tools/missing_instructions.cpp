@@ -41,7 +41,6 @@
 #include <mysql_driver.h>
 #include <mysql_connection.h>
 #include <cppconn/prepared_statement.h>
-#include "cachesim_row.h"
 
 #include <algorithm>
 #include <iomanip>
@@ -58,23 +57,23 @@
 namespace dynamorio {
 namespace drmemtrace {
 
-
 const std::string missing_instructions_t::TOOL_NAME = "Missing_Instructions tool";
 
+// TODO: Fix this entire method.
 bool
 missing_instructions_t::get_opcode(const memref_t &memref)
 {
-    
+
     static constexpr int name_width = 12;
     if (!type_is_instr(memref.instr.type) &&
         memref.data.type != TRACE_TYPE_INSTR_NO_FETCH) {
-        
+
         std::string name;
         switch (memref.data.type) {
         default: return std::string("<entry type " + memref.data.type) + ">\n";
         case TRACE_TYPE_THREAD_EXIT:
             return std::string("<thread " + memref.data.tid) + " exited>\n";
-            
+
         case TRACE_TYPE_READ: name = "read"; break;
         case TRACE_TYPE_WRITE: name = "write"; break;
         case TRACE_TYPE_INSTR_FLUSH: name = "iflush"; break;
@@ -211,7 +210,7 @@ missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &knobs)
     : cache_simulator_t(knobs)
 {
-last_experiment_id = insert_new_experiment(knobs);
+    last_experiment_id = insert_new_experiment(knobs);
 }
 
 int
@@ -273,7 +272,7 @@ missing_instructions_t::process_memref(const memref_t &memref)
     current_instruction_id++;
 
     int core;
-bool thread_switch = false;
+    bool thread_switch = false;
     bool core_switch = false;
     if (memref.data.tid == last_thread_)
         core = last_core_index_;
@@ -333,7 +332,7 @@ missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
         metric_name_t::MISSES, 2, core, cache_split_t::DATA);
 
     // bool cache_ret = cache_simulator_t::process_memref(memref);
-cache_simulator_t::process_memref(memref);
+    cache_simulator_t::process_memref(memref);
     int data_misses_l1_post = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 0, core, cache_split_t::DATA);
     int inst_misses_l1_post = cache_simulator_t::get_cache_metric(
@@ -372,17 +371,17 @@ cache_simulator_t::process_memref(memref);
         throw std::runtime_error(error_message);
     }
 
-            addr_t pc, addr;
-        if (type_is_instr(memref.data.type)) {
-            pc = memref.instr.addr;
+    addr_t pc, addr;
+    if (type_is_instr(memref.data.type)) {
+        pc = memref.instr.addr;
         addr = pc;
     } else {
-            assert(type_is_prefetch(memref.data.type) ||
-                   memref.data.type == TRACE_TYPE_READ ||
-                   memref.data.type == TRACE_TYPE_WRITE);
-            pc = memref.data.pc;
-                addr = memref.data.addr;
-        }
+        assert(type_is_prefetch(memref.data.type) ||
+               memref.data.type == TRACE_TYPE_READ ||
+               memref.data.type == TRACE_TYPE_WRITE);
+        pc = memref.data.pc;
+        addr = memref.data.addr;
+    }
 
     std::stringstream ss;
     ss << std::hex << addr;
