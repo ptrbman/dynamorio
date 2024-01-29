@@ -279,7 +279,7 @@ missing_instructions_t::process_memref(const memref_t &memref)
     else {
         core = core_for_thread(memref.data.tid);
         last_thread_ = memref.data.tid;
-        std::cout << "< CORE_SWITCH_FROM_" << last_core_ << "_TO_" << core << " >"
+        std::cout << "< CORE_SWITCH_FROM_" << last_core_index_ << "_TO_" << core << " >"
                   << std::endl;
         thread_switch = true;
         if (core != last_thread_)
