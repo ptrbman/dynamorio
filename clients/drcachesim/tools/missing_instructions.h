@@ -56,8 +56,7 @@ public:
     // XXX: Once we update our toolchains to guarantee C++17 support we could use
     // std::optional here.
 
-    bool
-    get_opcode(const memref_t &memref);
+    void get_opcode(const memref_t &memref, cachesim_row &row);
 
     missing_instructions_t(const cache_simulator_knobs_t &knobs);
 
@@ -124,12 +123,11 @@ private:
     insert_new_experiment(const cache_simulator_knobs_t &knobs);
     std::string
     create_experiment_insert_statement(const cache_simulator_knobs_t &knobs);
-    cache_metric_statistics
-    print_instr_stats(int core, bool thread_switch, bool core_switch,
+    void
+    update_instruction_stats(int core, bool thread_switch, bool core_switch,
                       const memref_t &memref, cachesim_row &row);
-    miss_counts
-    print_miss_stats_and_run_cache_instr_sim(int core, const memref_t &memref,
-                                             cachesim_row &row);
+    void
+    update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
     insert_new_row(const cachesim_row &row);
 };

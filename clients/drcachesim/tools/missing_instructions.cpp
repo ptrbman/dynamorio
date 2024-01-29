@@ -59,9 +59,9 @@ namespace drmemtrace {
 
 const std::string missing_instructions_t::TOOL_NAME = "Missing_Instructions tool";
 
-// TODO: Fix this entire method.
-bool
-missing_instructions_t::get_opcode(const memref_t &memref)
+// TODO: fix this entire method.
+void
+missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
 {
 
     static constexpr int name_width = 12;
@@ -103,42 +103,13 @@ missing_instructions_t::get_opcode(const memref_t &memref)
         case TRACE_TYPE_PREFETCH_WRITE_L3_NT: name = "pref-w-L3-NT"; break;
         case TRACE_TYPE_HARDWARE_PREFETCH: name = "pref-HW"; break;
         }
-        std::cerr << std::left << std::setw(name_width) << name << std::right
-                  << std::setw(2) << memref.data.size << " byte(s) @ 0x" << std::hex
-                  << std::setfill('0') << std::setw(sizeof(void *) * 2)
-                  << memref.data.addr << " by PC 0x" << std::setw(sizeof(void *) * 2)
-                  << memref.data.pc << std::dec << std::setfill(' ') << "\n";
-        return true;
+
+        row.set_byte_count(memref.data.size);
+        row.set_instr_type(name);
+        return;
     }
 
-    std::cerr << std::left << std::setw(name_width) << "ifetch" << std::right
-              << std::setw(2) << memref.instr.size << " byte(s) @ 0x" << std::hex
-              << std::setfill('0') << std::setw(sizeof(void *) * 2) << memref.instr.addr
-              << std::dec << std::setfill(' ');
-    //   if (!TESTANY(OFFLINE_FILE_TYPE_ENCODINGS, filetype_) && !has_modules_) {
-    //       // We can't disassemble so we provide what info the trace itself contains.
-    //       // XXX i#5486: We may want to store the taken target for conditional
-    //       // branches; if added, we can print it here.
-    //       // XXX: It may avoid initial confusion over the record-oriented output
-    //       // to indicate whether an instruction accesses memory, but that requires
-    //       // delayed printing.
-    //       std::cerr << " ";
-    //       switch (memref.instr.type) {
-    //       case TRACE_TYPE_INSTR: std::cerr << "non-branch\n"; break;
-    //       case TRACE_TYPE_INSTR_DIRECT_JUMP: std::cerr << "jump\n"; break;
-    //       case TRACE_TYPE_INSTR_INDIRECT_JUMP: std::cerr << "indirect jump\n"; break;
-    //       case TRACE_TYPE_INSTR_CONDITIONAL_JUMP: std::cerr << "conditional jump\n";
-    //       break; case TRACE_TYPE_INSTR_DIRECT_CALL: std::cerr << "call\n"; break; case
-    //       TRACE_TYPE_INSTR_INDIRECT_CALL: std::cerr << "indirect call\n"; break; case
-    //       TRACE_TYPE_INSTR_RETURN: std::cerr << "return\n"; break; case
-    //       TRACE_TYPE_INSTR_NO_FETCH: std::cerr << "non-fetched instruction\n"; break;
-    //       case TRACE_TYPE_INSTR_SYSENTER: std::cerr << "sysenter\n"; break;
-    //       default: error_string_ = "Uknown instruction type\n"; return false;
-    //       }
-    //       ++num_disasm_instrs_;
-    //       return true;
-    //   }
-
+    // TODO: see what's to be done here (based on the newest drio code)
     app_pc decode_pc;
     const app_pc orig_pc = (app_pc)memref.instr.addr;
     // if (TESTANY(OFFLINE_FILE_TYPE_ENCODINGS, filetype_)) {
@@ -146,50 +117,51 @@ missing_instructions_t::get_opcode(const memref_t &memref)
     decode_pc = const_cast<app_pc>(memref.instr.encoding);
     if (memref.instr.encoding_is_new) {
         // The code may have changed: invalidate the cache.
-        // disasm_cache_.erase(orig_pc);
+        disasm_cache_.erase(orig_pc);
     }
-    // } else {
-    //     // Legacy trace support where we need the binaries.
-    //     decode_pc = module_mapper_->find_mapped_trace_address(orig_pc);
-    //     if (!module_mapper_->get_last_error().empty()) {
-    //         error_string_ = "Failed to find mapped address for " +
-    //             to_hex_string(memref.instr.addr) + ": " +
-    //             module_mapper_->get_last_error();
-    //         return false;
-    //     }
-    // }
-
-    std::string disasm;
-    // auto cached_disasm = disasm_cache_.find(orig_pc);
-    //   if (cached_disasm != disasm_cache_.end()) {
-    //       disasm = cached_disasm->second;
-    //   } else {
-    // MAX_INSTR_DIS_SZ is set to 196 in core/ir/disassemble.h but is not
-    // exported so we just use the same value here.
-    char buf[196];
-    byte *next_pc =
-        disassemble_to_buffer(dcontext_.dcontext, decode_pc, orig_pc, /*show_pc=*/false,
-                              /*show_bytes=*/true, buf, BUFFER_SIZE_ELEMENTS(buf),
-                              /*printed=*/nullptr);
-    if (next_pc == nullptr) {
-        error_string_ = "Failed to disassemble " + to_hex_string(memref.instr.addr);
+}
+else
+{
+    // Legacy trace support where we need the binaries.
+    decode_pc = module_mapper_->find_mapped_trace_address(orig_pc);
+    if (!module_mapper_->get_last_error().empty()) {
+        error_string_ = "Failed to find mapped address for " +
+            to_hex_string(memref.instr.addr) + ": " + module_mapper_->get_last_error();
         return false;
     }
-    disasm = buf;
-    // disasm_cache_.insert({ orig_pc, disasm });
-    //   }
-    //   // Put our prefix on raw byte spillover, and skip the other columns.
-    auto newline = disasm.find('\n');
-    if (newline != std::string::npos && newline < disasm.size() - 1) {
-        std::stringstream prefix;
-        // print_prefix(memstream, memref, -1, prefix);
-        std::string skip_name(name_width, ' ');
-        disasm.insert(newline + 1,
-                      prefix.str() + skip_name + "                               ");
-    }
-    std::cerr << disasm;
-    //   ++num_disasm_instrs_;
-    return true;
+}
+
+std::string disasm;
+// auto cached_disasm = disasm_cache_.find(orig_pc);
+//   if (cached_disasm != disasm_cache_.end()) {
+//       disasm = cached_disasm->second;
+//   } else {
+// MAX_INSTR_DIS_SZ is set to 196 in core/ir/disassemble.h but is not
+// exported so we just use the same value here.
+char buf[196];
+byte *next_pc =
+    disassemble_to_buffer(dcontext_.dcontext, decode_pc, orig_pc, /*show_pc=*/false,
+                          /*show_bytes=*/true, buf, BUFFER_SIZE_ELEMENTS(buf),
+                          /*printed=*/nullptr);
+if (next_pc == nullptr) {
+    error_string_ = "Failed to disassemble " + to_hex_string(memref.instr.addr);
+    throw std::invalid_argument(error_string_);
+}
+disasm = buf;
+// disasm_cache_.insert({ orig_pc, disasm });
+//   }
+//   // Put our prefix on raw byte spillover, and skip the other columns.
+auto newline = disasm.find('\n');
+if (newline != std::string::npos && newline < disasm.size() - 1) {
+    std::stringstream prefix;
+
+    std::string skip_name(name_width, ' ');
+    disasm.insert(newline + 1,
+                  prefix.str() + skip_name + "                               ");
+}
+
+row.set_instr_type("ifetch");
+row.set_disassembly_string(disasm);
 }
 
 analysis_tool_t *
@@ -233,13 +205,15 @@ missing_instructions_t::insert_new_experiment(const cache_simulator_knobs_t &kno
         std::unique_ptr<sql::ResultSet> res(
             stmt->executeQuery("SELECT LAST_INSERT_ID()"));
         if (res->next()) {
-            return res->getInt64(1); // The first column in the result set
+            int64_t to_return = res->getInt64(1);
+            std::cerr << "Returning " << to_return << std::endl;
+            return to_return; // The first column in the result set
         } else {
             return -1;
         }
     } catch (sql::SQLException &e) {
         std::cerr << "SQLException: " << e.what();
-        return -1;
+        throw e;
     }
 }
 
@@ -252,7 +226,7 @@ missing_instructions_t::create_experiment_insert_statement(
        << "l1d_size, l1i_size, num_cores, l1i_assoc, l1d_assoc, "
        << "ll_size, line_size, ll_assoc, model_coherence, replace_policy, "
        << "skip_refs, warmup_refs, warmup_fraction, sim_refs, cpu_scheduling, "
-       << "use_physical, verbose"
+       << "use_physical"
        << ") VALUES ("
        << "'" << (knobs.L1D_size / 1024) << "K', "
        << "'" << (knobs.L1I_size / 1024) << "K', " << knobs.num_cores << ", "
@@ -260,9 +234,9 @@ missing_instructions_t::create_experiment_insert_statement(
        << "'" << (knobs.LL_size / (1024 * 1024)) << "M', " << knobs.line_size << ", "
        << knobs.LL_assoc << ", " << (knobs.model_coherence ? "TRUE" : "FALSE") << ", "
        << "'" << knobs.replace_policy << "', " << knobs.skip_refs << ", "
-       << knobs.warmup_refs << ", " << knobs.warmup_fraction << ", " << knobs.sim_refs
-       << ", " << (knobs.cpu_scheduling ? "TRUE" : "FALSE") << ", "
-       << (knobs.use_physical ? "TRUE" : "FALSE") << ", " << knobs.verbose << ");";
+       << knobs.warmup_refs << ", " << knobs.warmup_fraction << ", " << 0 << ", "
+       << (knobs.cpu_scheduling ? "TRUE" : "FALSE") << ", "
+       << (knobs.use_physical ? "TRUE" : "FALSE") << ");";
     return ss.str();
 }
 
@@ -286,13 +260,13 @@ missing_instructions_t::process_memref(const memref_t &memref)
             core_switch = true;
         last_core_index_ = core;
     }
+    std::cerr << "Doing " << current_instruction_id << std::endl;
+    std::unique_ptr<cachesim_row> row(new cachesim_row());
 
-    std::unique_ptr<cachesim_row> row = std::make_unique<cachesim_row>();
-
-    print_instr_stats(core, thread_switch, core_switch, memref, *row);
-    print_miss_stats_and_run_cache_instr_sim(core, memref, *row);
+    update_instruction_stats(core, thread_switch, core_switch, memref, *row);
+    update_miss_stats(core, memref, *row);
     insert_new_row(*row);
-    return "";
+    return true;
 }
 
 void
@@ -302,26 +276,54 @@ missing_instructions_t::insert_new_row(const cachesim_row &row)
         std::unique_ptr<sql::mysql::MySQL_Driver> driver(
             sql::mysql::get_mysql_driver_instance());
         std::unique_ptr<sql::Connection> conn(
-            driver->connect("tcp://HOST:3306", "USERNAME", "PASSWORD"));
-        conn->setSchema("DATABASE_NAME");
+            driver->connect("tcp://db:3306", "root", "cta"));
+        conn->setSchema("test_db_1");
 
         std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
-            "INSERT INTO cache_stats (core, thread_switch, core_switch, l1_data_hits, "
-            "...) VALUES (?, ?, ?, ?, ...)"));
+            "INSERT INTO cache_stats ("
+            "access_address, pc_address, l1d_miss, l1i_miss, ll_miss, instr_type, "
+            "byte_count, disassembly_string, current_instruction_id, core, "
+            "thread_switch, core_switch, l1_data_hits, l1_data_misses, l1_data_ratio, "
+            "l1_inst_hits, l1_inst_misses, l1_inst_ratio, ll_hits, ll_misses, ll_ratio"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
 
-        pstmt->setInt(1, core);
-        pstmt->setInt(2, thread_switch);
-        // Set the rest of the parameters similarly
+        // Assuming `row` is an instance of cachesim_row and `conn` is a valid
+        // sql::Connection pointer.
+        pstmt->setString(1, row.get_access_address());
+        pstmt->setString(2, row.get_pc_address());
+        pstmt->setBoolean(3, row.get_l1d_miss());
+        pstmt->setBoolean(4, row.get_l1i_miss());
+        pstmt->setBoolean(5, row.get_ll_miss());
+        pstmt->setString(6, row.get_instr_type());
+        pstmt->setInt(7, static_cast<int>(row.get_byte_count()));
+        pstmt->setString(8, row.get_disassembly_string());
+        pstmt->setInt(9, row.get_current_instruction_id());
+        pstmt->setInt(10, row.get_core());
+        pstmt->setBoolean(11, row.get_thread_switch());
+        pstmt->setBoolean(12, row.get_core_switch());
+        pstmt->setInt(13, row.get_l1_data_hits());
+        pstmt->setInt(14, row.get_l1_data_misses());
+        pstmt->setDouble(15, static_cast<double>(row.get_l1_data_ratio()));
+        pstmt->setInt(16, row.get_l1_inst_hits());
+        pstmt->setInt(17, row.get_l1_inst_misses());
+        pstmt->setDouble(18, static_cast<double>(row.get_l1_inst_ratio()));
+        pstmt->setInt(19, row.get_ll_hits());
+        pstmt->setInt(20, row.get_ll_misses());
+        pstmt->setDouble(21, static_cast<double>(row.get_ll_ratio()));
+
+        // Execute the prepared statement
         pstmt->executeUpdate();
+
+        std::cerr << "How far: " << row.get_current_instruction_id() << std::endl;
     } catch (sql::SQLException &e) {
         std::cerr << "SQLException: " << e.what();
+        throw e;
     }
 }
 
-missing_instructions_t::miss_counts
-missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
-                                                                 const memref_t &memref,
-                                                                 cachesim_row &row)
+void
+missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
+                                          cachesim_row &row)
 {
 
     int data_misses_l1_pre = cache_simulator_t::get_cache_metric(
@@ -389,20 +391,21 @@ missing_instructions_t::print_miss_stats_and_run_cache_instr_sim(int core,
     ss << std::hex << pc;
     std::string pc_hex = ss.str();
 
-    std::cerr << "[Access address: " << address_hex << "]";
-    std::cerr << "[PC: " << pc_hex << "]";
-    std::cerr << "[L1D miss: " << data_miss_l1 << "]";
-    std::cerr << "[L1I miss: " << inst_miss_l1 << "]";
-    std::cerr << "[LL miss: " << unified_miss_ll << "]";
+    row.set_pc_address(pc_hex);
+    row.set_access_address(address_hex);
+    row.set_l1d_miss(data_miss_l1);
+    row.set_l1i_miss(inst_miss_l1);
+    row.set_ll_miss(unified_miss_ll);
 
-    get_opcode(memref);
-    missing_instructions_t::miss_counts counts;
-    return counts;
+    get_opcode(memref, row);
+
+    insert_new_row(row);
 }
 
-missing_instructions_t::cache_metric_statistics
-missing_instructions_t::print_instr_stats(int core, bool thread_switch, bool core_switch,
-                                          const memref_t &memref, cachesim_row &row)
+void
+missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
+                                                 bool core_switch, const memref_t &memref,
+                                                 cachesim_row &row)
 {
     int l1_data_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 0, core,
                                                            cache_split_t::DATA);
@@ -424,45 +427,20 @@ missing_instructions_t::print_instr_stats(int core, bool thread_switch, bool cor
     float ll_ratio =
         static_cast<float>(ll_misses) / static_cast<float>(ll_misses + ll_hits);
 
-    missing_instructions_t::cache_metric_statistics stats;
-    stats.current_instruction_id = current_instruction_id;
-    stats.core = core;
-    stats.thread_switch = thread_switch;
-    stats.core_switch = core_switch;
-    stats.l1_data_misses = l1_data_misses;
-    stats.l1_data_hits = l1_data_hits;
-    stats.l1_inst_hits = l1_inst_hits;
-    stats.l1_inst_misses = l1_inst_misses;
-    stats.l1_data_ratio = l1_data_ratio;
-    stats.l1_inst_ratio = l1_inst_ratio;
-    stats.ll_hits = ll_hits;
-    stats.ll_misses = ll_misses;
-    stats.ll_ratio = ll_ratio;
-
-    return stats;
+    row.set_current_instruction_id(current_instruction_id);
+    row.set_core(core);
+    row.set_thread_switch(thread_switch);
+    row.set_core_switch(core_switch);
+    row.set_l1_data_misses(l1_data_misses);
+    row.set_l1_data_hits(l1_data_hits);
+    row.set_l1_inst_hits(l1_inst_hits);
+    row.set_l1_inst_misses(l1_inst_misses);
+    row.set_l1_data_ratio(l1_data_ratio);
+    row.set_l1_inst_ratio(l1_inst_ratio);
+    row.set_ll_hits(ll_hits);
+    row.set_ll_misses(ll_misses);
+    row.set_ll_ratio(ll_ratio);
 }
-
-// TODO: implement this
-// void insertStatsToDatabase(/* Parameters representing each stat */)
-// {
-//     try {
-//         sql::mysql::MySQL_Driver *driver = sql::mysql::get_mysql_driver_instance();
-//         std::unique_ptr<sql::Connection> conn(
-//             driver->connect("tcp://HOST:3306", "USERNAME", "PASSWORD"));
-//         conn->setSchema("DATABASE_NAME");
-
-//         std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
-//             "INSERT INTO cache_stats (core, thread_switch, core_switch, l1_data_hits, "
-//             "...) VALUES (?, ?, ?, ?, ...)"));
-
-//         pstmt->setInt(1, core);
-//         pstmt->setInt(2, thread_switch);
-//         // Set the rest of the parameters similarly
-//         pstmt->executeUpdate();
-//     } catch (sql::SQLException &e) {
-//         std::cerr << "SQLException: " << e.what();
-//     }
-// }
 
 bool
 missing_instructions_t::print_results()
