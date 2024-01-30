@@ -1,6 +1,9 @@
 name: Build CI
 
 on:
+  # Manual trigger using the Actions page. May remove when integration complete.
+  # Run on pushes to master and on pull request changes, including from a
+  # forked repo with no "push" trigger, while avoiding duplicate triggers.
   push:
     branches:
       - edin-updating-database-approach
@@ -8,16 +11,43 @@ on:
     branches:
       - edin-updating-database-approach
 
+defaults:
+  run:
+    shell: bash
+  # We'd like to add common initial steps for all jobs, but that's not supported.
+  # Composite Run Steps can help, but we don't have that many common steps -- just
+  # checkout and fetch for now.
+  # https://docs.github.com/en/free-pro-team@latest/actions/creating-actions/about-actions#composite-run-steps-actions
+  # https://github.community/t/reusing-sharing-inheriting-steps-between-jobs-declarations
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
+      with:
+        submodules: true
 
-    - name: Install dependencies
-      run: sudo apt-get update && sudo apt-get install -y cmake g++ g++-multilib libmysqlcppconn-dev doxygen git zlib1g-dev libunwind-dev libsnappy-dev liblz4-dev
+    # Install multilib for non-cross-compiling Linux build.
+    # GA CI uses packages.microsoft.com which is missing i386 packages, and
+    # attempts at using apt with us.archive-ubuntu.com hit dep issues:
+    # so we manually install the i386 packages we need.
+    - name: Create Build Environment
+      run: |
+        sudo apt update
+        sudo apt-get -y install doxygen vera++ zlib1g-dev libsnappy-dev \
+          liblz4-dev libmysqlcppconn g++-multilib libunwind-dev
+        sudo add-apt-repository 'deb [arch=i386] http://us.archive.ubuntu.com/ubuntu focal main'
+        apt download libunwind8:i386 libunwind-dev:i386 liblzma5:i386 \
+          zlib1g:i386 zlib1g-dev:i386
+        mkdir ../extract
+        for i in *.deb; do dpkg-deb -x $i ../extract; done
+        sudo rsync -av ../extract/usr/lib/i386-linux-gnu/ /usr/lib/i386-linux-gnu/
+        sudo rsync -av ../extract/lib/i386-linux-gnu/ /usr/lib/i386-linux-gnu/
+        sudo rsync -av ../extract/usr/include/i386-linux-gnu/ /usr/include/
+        echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
 
     - name: Initialize submodules
       run: git submodule update --init --recursive
