@@ -10,6 +10,8 @@ on:
 
 jobs:
   build:
+    if: github.actor == 'jelacicedin' # Replace with your GitHub username
+
     runs-on: ubuntu-latest
 
     steps:
