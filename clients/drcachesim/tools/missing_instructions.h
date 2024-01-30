@@ -44,8 +44,8 @@
 #include "../simulator/cache_simulator.h"
 #include "cachesim_row.h"
 #include "memref.h"
-#include "raw2trace.h"
-#include "raw2trace_directory.h"
+// #include "raw2trace.h"
+// #include "raw2trace_directory.h"
 
 namespace dynamorio {
 namespace drmemtrace {

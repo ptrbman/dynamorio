@@ -51,9 +51,9 @@
 #include <stdexcept>
 #include "memref.h"
 #include "memtrace_stream.h"
-#include "raw2trace.h"
-#include "raw2trace_directory.h"
-#include "utils.h"
+// #include "raw2trace.h"
+// #include "raw2trace_directory.h"
+// #include "utils.h"
 
 namespace dynamorio {
 namespace drmemtrace {
@@ -189,8 +189,8 @@ missing_instructions_t::insert_new_experiment(const cache_simulator_knobs_t &kno
     try {
         sql::mysql::MySQL_Driver *driver = sql::mysql::get_mysql_driver_instance();
         std::unique_ptr<sql::Connection> conn(
-            driver->connect("tcp://db:3306", "root", "cta"));
-        conn->setSchema("test_db_1");
+            driver->connect("localhost", "root", ""));
+        conn->setSchema("cta");
 
         std::unique_ptr<sql::PreparedStatement> pstmt(
             conn->prepareStatement(create_experiment_insert_statement(knobs)));
@@ -279,8 +279,8 @@ missing_instructions_t::insert_new_row(const cachesim_row &row)
         std::unique_ptr<sql::mysql::MySQL_Driver> driver(
             sql::mysql::get_mysql_driver_instance());
         std::unique_ptr<sql::Connection> conn(
-            driver->connect("tcp://db:3306", "root", "cta"));
-        conn->setSchema("test_db_1");
+            driver->connect("localhost", "root", ""));
+        conn->setSchema("cta");
 
         std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
             "INSERT INTO cache_stats ("
