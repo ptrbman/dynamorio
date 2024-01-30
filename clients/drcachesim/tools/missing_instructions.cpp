@@ -53,6 +53,7 @@
 #include "memtrace_stream.h"
 #include "raw2trace.h"
 #include "raw2trace_directory.h"
+#include "utils.h"
 
 namespace dynamorio {
 namespace drmemtrace {
@@ -70,9 +71,8 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
 
         std::string name;
         switch (memref.data.type) {
-        default: return std::string("<entry type " + memref.data.type) + ">\n";
-        case TRACE_TYPE_THREAD_EXIT:
-            return std::string("<thread " + memref.data.tid) + " exited>\n";
+        default: name = "entry_type_" + memref.data.type; return;
+        case TRACE_TYPE_THREAD_EXIT: name = "thread_exit"; return;
 
         case TRACE_TYPE_READ: name = "read"; break;
         case TRACE_TYPE_WRITE: name = "write"; break;
@@ -109,7 +109,7 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
         return;
     }
 
-    // TODO: see what's to be done here (based on the newest drio code)
+    // TODO: see what's to be done here (based on the newest drio code) maybe
     app_pc decode_pc;
     const app_pc orig_pc = (app_pc)memref.instr.addr;
     // if (TESTANY(OFFLINE_FILE_TYPE_ENCODINGS, filetype_)) {
