@@ -115,53 +115,51 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
     // if (TESTANY(OFFLINE_FILE_TYPE_ENCODINGS, filetype_)) {
     // The trace has instruction encodings inside it.
     decode_pc = const_cast<app_pc>(memref.instr.encoding);
-    if (memref.instr.encoding_is_new) {
-        // The code may have changed: invalidate the cache.
-        disasm_cache_.erase(orig_pc);
+    // if (memref.instr.encoding_is_new) {
+    //     // The code may have changed: invalidate the cache.
+    //     disasm_cache_.erase(orig_pc);
+    // } else {
+    //     // Legacy trace support where we need the binaries.
+    //     decode_pc = module_mapper_->find_mapped_trace_address(orig_pc);
+    //     if (!module_mapper_->get_last_error().empty()) {
+    //         error_string_ = "Failed to find mapped address for " +
+    //             to_hex_string(memref.instr.addr) + ": " +
+    //             module_mapper_->get_last_error();
+    //         return false;
+    //     }
+    // }
+
+    std::string disasm;
+    // auto cached_disasm = disasm_cache_.find(orig_pc);
+    //   if (cached_disasm != disasm_cache_.end()) {
+    //       disasm = cached_disasm->second;
+    //   } else {
+    // MAX_INSTR_DIS_SZ is set to 196 in core/ir/disassemble.h but is not
+    // exported so we just use the same value here.
+    char buf[196];
+    byte *next_pc =
+        disassemble_to_buffer(dcontext_.dcontext, decode_pc, orig_pc, /*show_pc=*/false,
+                              /*show_bytes=*/true, buf, BUFFER_SIZE_ELEMENTS(buf),
+                              /*printed=*/nullptr);
+    if (next_pc == nullptr) {
+        error_string_ = "Failed to disassemble " + to_hex_string(memref.instr.addr);
+        throw std::invalid_argument(error_string_);
     }
-}
-else
-{
-    // Legacy trace support where we need the binaries.
-    decode_pc = module_mapper_->find_mapped_trace_address(orig_pc);
-    if (!module_mapper_->get_last_error().empty()) {
-        error_string_ = "Failed to find mapped address for " +
-            to_hex_string(memref.instr.addr) + ": " + module_mapper_->get_last_error();
-        return false;
+    disasm = buf;
+    // disasm_cache_.insert({ orig_pc, disasm });
+    //   }
+    //   // Put our prefix on raw byte spillover, and skip the other columns.
+    auto newline = disasm.find('\n');
+    if (newline != std::string::npos && newline < disasm.size() - 1) {
+        std::stringstream prefix;
+
+        std::string skip_name(name_width, ' ');
+        disasm.insert(newline + 1,
+                      prefix.str() + skip_name + "                               ");
     }
-}
 
-std::string disasm;
-// auto cached_disasm = disasm_cache_.find(orig_pc);
-//   if (cached_disasm != disasm_cache_.end()) {
-//       disasm = cached_disasm->second;
-//   } else {
-// MAX_INSTR_DIS_SZ is set to 196 in core/ir/disassemble.h but is not
-// exported so we just use the same value here.
-char buf[196];
-byte *next_pc =
-    disassemble_to_buffer(dcontext_.dcontext, decode_pc, orig_pc, /*show_pc=*/false,
-                          /*show_bytes=*/true, buf, BUFFER_SIZE_ELEMENTS(buf),
-                          /*printed=*/nullptr);
-if (next_pc == nullptr) {
-    error_string_ = "Failed to disassemble " + to_hex_string(memref.instr.addr);
-    throw std::invalid_argument(error_string_);
-}
-disasm = buf;
-// disasm_cache_.insert({ orig_pc, disasm });
-//   }
-//   // Put our prefix on raw byte spillover, and skip the other columns.
-auto newline = disasm.find('\n');
-if (newline != std::string::npos && newline < disasm.size() - 1) {
-    std::stringstream prefix;
-
-    std::string skip_name(name_width, ' ');
-    disasm.insert(newline + 1,
-                  prefix.str() + skip_name + "                               ");
-}
-
-row.set_instr_type("ifetch");
-row.set_disassembly_string(disasm);
+    row.set_instr_type("ifetch");
+    row.set_disassembly_string(disasm);
 }
 
 analysis_tool_t *
@@ -245,28 +243,33 @@ missing_instructions_t::process_memref(const memref_t &memref)
 {
     current_instruction_id++;
 
-    int core;
-    bool thread_switch = false;
-    bool core_switch = false;
-    if (memref.data.tid == last_thread_)
-        core = last_core_index_;
-    else {
-        core = core_for_thread(memref.data.tid);
-        last_thread_ = memref.data.tid;
-        std::cout << "< CORE_SWITCH_FROM_" << last_core_index_ << "_TO_" << core << " >"
-                  << std::endl;
-        thread_switch = true;
-        if (core != last_thread_)
-            core_switch = true;
-        last_core_index_ = core;
-    }
-    std::cerr << "Doing " << current_instruction_id << std::endl;
-    std::unique_ptr<cachesim_row> row(new cachesim_row());
+    try {
+        int core;
+        bool thread_switch = false;
+        bool core_switch = false;
+        if (memref.data.tid == last_thread_)
+            core = last_core_index_;
+        else {
+            core = core_for_thread(memref.data.tid);
+            last_thread_ = memref.data.tid;
+            std::cout << "< CORE_SWITCH_FROM_" << last_core_index_ << "_TO_" << core
+                      << " >" << std::endl;
+            thread_switch = true;
+            if (core != last_thread_)
+                core_switch = true;
+            last_core_index_ = core;
+        }
+        std::cerr << "Doing " << current_instruction_id << std::endl;
+        std::unique_ptr<cachesim_row> row(new cachesim_row());
 
-    update_instruction_stats(core, thread_switch, core_switch, memref, *row);
-    update_miss_stats(core, memref, *row);
-    insert_new_row(*row);
-    return true;
+        update_instruction_stats(core, thread_switch, core_switch, memref, *row);
+        update_miss_stats(core, memref, *row);
+        insert_new_row(*row);
+        return true;
+    } catch (const std::exception &ex) {
+        std::cerr << "Issue occurred during disassembly of trace: " << ex.what();
+        return false;
+    }
 }
 
 void
