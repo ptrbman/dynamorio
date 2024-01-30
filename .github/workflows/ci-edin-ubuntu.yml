@@ -1,0 +1,67 @@
+name: Build CI
+
+on:
+  push:
+    branches:
+      - edin-updating-database-approach
+  pull_request:
+    branches:
+      - edin-updating-database-approach
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install -y cmake g++ g++-multilib doxygen git zlib1g-dev libunwind-dev libsnappy-dev liblz4-dev
+
+    - name: Initialize submodules
+      run: git submodule update --init --recursive
+
+    - name: Create build directory
+      run: mkdir build
+
+    - name: Generate makefiles with CMake
+      run: |
+        cd build
+        cmake ..
+
+    - name: Build the project
+      run: |
+        cd build
+        make -j4
+
+    - name: Test run
+      run: |
+        ./build/bin64/drrun echo hello world
+
+    - name: Archive build artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: dynamorio-build
+        path: /build
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./build
+        asset_name: build.zip
+        asset_content_type: application/zip
