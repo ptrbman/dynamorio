@@ -31,8 +31,8 @@ private:
     float ll_ratio;
 
 public:
-    cachesim_row(/* args */);
-    ~cachesim_row();
+    // cachesim_row(/* args */);
+    // ~cachesim_row();
 
     // Setters declarations
     void
@@ -123,13 +123,13 @@ public:
     get_ll_ratio() const;
 };
 
-cachesim_row::cachesim_row(/* args */)
-{
-}
+// cachesim_row::cachesim_row(/* args */)
+// {
+// }
 
-cachesim_row::~cachesim_row()
-{
-}
+// cachesim_row::~cachesim_row()
+// {
+// }
 } // namespace drmemtrace
 } // namespace dynamorio
 #endif /*_CACHE_SIMULATOR_ROW_H*/
