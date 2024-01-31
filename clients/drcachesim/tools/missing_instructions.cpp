@@ -252,7 +252,8 @@ missing_instructions_t::process_memref(const memref_t &memref)
                 core_switch = true;
             last_core_index_ = core;
         }
-        if (current_instruction_id%1000==0) std::cerr << "Doing " << current_instruction_id << std::endl;
+        if (current_instruction_id % 1000 == 0)
+            std::cerr << "Doing " << current_instruction_id << std::endl;
         std::unique_ptr<cachesim_row> row(new cachesim_row());
 
         update_instruction_stats(core, thread_switch, core_switch, memref, *row);
@@ -270,7 +271,8 @@ missing_instructions_t::insert_new_row(const cachesim_row &row)
 {
     try {
 
-        if (current_instruction_id%100000==0)splitAndCompress(cache_stats_filename, 10000000);
+        if (current_instruction_id % 100000 == 0)
+            splitAndCompress(cache_stats_filename, 10000000);
         // Open the CSV file in append mode
         std::ofstream cache_stats_file(cache_stats_filename, std::ios::app);
 
@@ -428,6 +430,12 @@ missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
 bool
 missing_instructions_t::print_results()
 {
+    // Before exiting the main function, delete the CSV file
+    if (remove(cache_stats_filename.c_str()) != 0) {
+        perror("Error deleting file");
+    } else {
+        std::cout << "File successfully deleted" << std::endl;
+    }
     std::cerr << TOOL_NAME << " results:\n";
     cache_simulator_t::print_results();
     // std::cerr << std::setw(15) << num_disasm_instrs_ << " : total instructions\n";
@@ -435,14 +443,18 @@ missing_instructions_t::print_results()
 }
 
 // Function to get the size of a file
-long missing_instructions_t::getFileSize(const std::string& fileName) {
+long
+missing_instructions_t::getFileSize(const std::string &fileName)
+{
     struct stat stat_buf;
     int rc = stat(fileName.c_str(), &stat_buf);
     return rc == 0 ? stat_buf.st_size : -1;
 }
 
 // Function to split and compress the file using LZ4
-void missing_instructions_t::splitAndCompress(const std::string& fileName, int max_size) {
+void
+missing_instructions_t::splitAndCompress(const std::string &fileName, int max_size)
+{
     std::ifstream file(fileName, std::ios::binary);
     std::string line;
     int fileCount = 0;
@@ -458,8 +470,9 @@ void missing_instructions_t::splitAndCompress(const std::string& fileName, int m
         }
 
         // LZ4 compression logic here
-        char* compressedData = new char[LZ4_compressBound(line.size())];
-        int compressedSize = LZ4_compress_default(line.c_str(), compressedData, line.size(), LZ4_compressBound(line.size()));
+        char *compressedData = new char[LZ4_compressBound(line.size())];
+        int compressedSize = LZ4_compress_default(
+            line.c_str(), compressedData, line.size(), LZ4_compressBound(line.size()));
 
         outFile.write(compressedData, compressedSize);
         delete[] compressedData;
@@ -478,7 +491,6 @@ void missing_instructions_t::splitAndCompress(const std::string& fileName, int m
     // // Optionally remove the original file or rename it
     // std::remove(fileName.c_str());
 }
-
 
 } // namespace drmemtrace
 } // namespace dynamorio
