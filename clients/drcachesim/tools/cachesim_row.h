@@ -13,8 +13,8 @@ private:
     bool l1d_miss;
     bool l1i_miss;
     bool ll_miss;
-    std::string instr_type;
-    uint8_t byte_count;
+    std::string instr_type = "";
+    int byte_count;
     std::string disassembly_string;
     int current_instruction_id;
     int core;

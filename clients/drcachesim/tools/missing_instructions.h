@@ -121,7 +121,7 @@ private:
     int last_experiment_id;
     int
     insert_new_experiment(const cache_simulator_knobs_t &knobs);
-    std::string
+    void
     create_experiment_insert_statement(const cache_simulator_knobs_t &knobs);
     void
     update_instruction_stats(int core, bool thread_switch, bool core_switch,
@@ -130,6 +130,8 @@ private:
     update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
     insert_new_row(const cachesim_row &row);
+    std::string cache_stats_filename;
+    std::string experiments_filename = "experiments.csv";
 };
 
 } // namespace drmemtrace

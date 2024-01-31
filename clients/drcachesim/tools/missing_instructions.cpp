@@ -38,9 +38,9 @@
 
 #include "dr_api.h"
 #include "missing_instructions.h"
-#include <mysql_driver.h>
-#include <mysql_connection.h>
-#include <cppconn/prepared_statement.h>
+// #include <mysql_driver.h>
+// #include <mysql_connection.h>
+// #include <cppconn/prepared_statement.h>
 
 #include <algorithm>
 #include <iomanip>
@@ -51,6 +51,8 @@
 #include <stdexcept>
 #include "memref.h"
 #include "memtrace_stream.h"
+#include <fstream>
+#include <ctime>
 // #include "raw2trace.h"
 // #include "raw2trace_directory.h"
 // #include "utils.h"
@@ -157,9 +159,11 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
         disasm.insert(newline + 1,
                       prefix.str() + skip_name + "                               ");
     }
+    disasm.erase(std::remove(disasm.begin(), disasm.end(), '\n'), disasm.end());
 
     row.set_instr_type("ifetch");
     row.set_disassembly_string(disasm);
+    row.set_byte_count(memref.data.size);
 }
 
 analysis_tool_t *
@@ -167,75 +171,61 @@ missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 {
     return new missing_instructions_t(knobs);
 }
-// missing_instructions_tool_create(const std::string &module_file_path, memref_tid_t
-// thread,
-//                  uint64_t skip_refs, uint64_t sim_refs, const std::string &syntax,
-//                  unsigned int verbose, const std::string &alt_module_dir)
-// {
-//     return new missing_instructions_t(module_file_path, thread, skip_refs, sim_refs,
-//     syntax, verbose,
-//                       alt_module_dir);
-// }
 
 missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &knobs)
     : cache_simulator_t(knobs)
 {
-    last_experiment_id = insert_new_experiment(knobs);
+    create_experiment_insert_statement(knobs);
 }
 
-int
-missing_instructions_t::insert_new_experiment(const cache_simulator_knobs_t &knobs)
-{
-    try {
-        sql::mysql::MySQL_Driver *driver = sql::mysql::get_mysql_driver_instance();
-        std::unique_ptr<sql::Connection> conn(
-            driver->connect("localhost", "root", ""));
-        conn->setSchema("cta");
-
-        std::unique_ptr<sql::PreparedStatement> pstmt(
-            conn->prepareStatement(create_experiment_insert_statement(knobs)));
-
-        pstmt->executeUpdate();
-
-        std::unique_ptr<sql::Statement> stmt(conn->createStatement());
-
-        // Get the last insert id
-        std::unique_ptr<sql::ResultSet> res(
-            stmt->executeQuery("SELECT LAST_INSERT_ID()"));
-        if (res->next()) {
-            int64_t to_return = res->getInt64(1);
-            std::cerr << "Returning " << to_return << std::endl;
-            return to_return; // The first column in the result set
-        } else {
-            return -1;
-        }
-    } catch (sql::SQLException &e) {
-        std::cerr << "SQLException: " << e.what();
-        throw e;
-    }
-}
-
-std::string
+void
 missing_instructions_t::create_experiment_insert_statement(
     const cache_simulator_knobs_t &knobs)
 {
-    std::stringstream ss;
-    ss << "INSERT INTO experiments ("
-       << "l1d_size, l1i_size, num_cores, l1i_assoc, l1d_assoc, "
-       << "ll_size, line_size, ll_assoc, model_coherence, replace_policy, "
-       << "skip_refs, warmup_refs, warmup_fraction, sim_refs, cpu_scheduling, "
-       << "use_physical"
-       << ") VALUES ("
-       << "'" << (knobs.L1D_size / 1024) << "K', "
-       << "'" << (knobs.L1I_size / 1024) << "K', " << knobs.num_cores << ", "
-       << knobs.L1I_assoc << ", " << knobs.L1D_assoc << ", "
-       << "'" << (knobs.LL_size / (1024 * 1024)) << "M', " << knobs.line_size << ", "
-       << knobs.LL_assoc << ", " << (knobs.model_coherence ? "TRUE" : "FALSE") << ", "
-       << "'" << knobs.replace_policy << "', " << knobs.skip_refs << ", "
-       << knobs.warmup_refs << ", " << knobs.warmup_fraction << ", " << 0 << ", "
-       << (knobs.cpu_scheduling ? "TRUE" : "FALSE") << ", "
-       << (knobs.use_physical ? "TRUE" : "FALSE") << ");";
-    return ss.str();
+    // Generate a unique ID based on current time
+    std::stringstream id_ss;
+    id_ss << std::time(nullptr);
+    std::string experiment_id = id_ss.str();
+
+    // Create or open the experiments CSV file
+    std::ofstream experiments_file(experiments_filename, std::ios::app);
+
+    // Check if the file is empty and write the header if it is
+    std::ifstream check_file(experiments_filename);
+    if (check_file.peek() == std::ifstream::traits_type::eof()) {
+        experiments_file << "Experiment ID, L1D Size, L1I Size, Num Cores, "
+                         << "L1I Assoc, L1D Assoc, LL Size, Line Size, LL Assoc, "
+                         << "Model Coherence, Replace Policy, Skip Refs, Warmup Refs, "
+                         << "Warmup Fraction, CPU Scheduling, Use Physical\n";
+    }
+    check_file.close();
+
+    // Write experiment data to CSV
+    experiments_file << experiment_id << ", " << (knobs.L1D_size / 1024) << "K, "
+                     << (knobs.L1I_size / 1024) << "K, " << knobs.num_cores << ", "
+                     << knobs.L1I_assoc << ", " << knobs.L1D_assoc << ", "
+                     << (knobs.LL_size / (1024 * 1024)) << "M, " << knobs.line_size
+                     << ", " << knobs.LL_assoc << ", "
+                     << (knobs.model_coherence ? "TRUE" : "FALSE") << ", "
+                     << "'" << knobs.replace_policy << "', " << knobs.skip_refs << ", "
+                     << knobs.warmup_refs << ", " << knobs.warmup_fraction << ", " << 0
+                     << ", " // Assuming 0 for Sim Refs as per your method
+                     << (knobs.cpu_scheduling ? "TRUE" : "FALSE") << ", "
+                     << (knobs.use_physical ? "TRUE" : "FALSE") << "\n";
+    experiments_file.close();
+    // Open the corresponding cache statistics CSV file
+    cache_stats_filename = "cache_stats_" + experiment_id + ".csv";
+    std::ofstream cache_file(cache_stats_filename);
+
+    // Write headers to the cache statistics CSV file
+    cache_file
+        << "Instruction number, Access Address, PC Address, L1D Miss, L1I Miss, LL Miss, "
+           "Instr Type, "
+        << "Byte Count, Disassembly String, Current Instruction ID, Core, "
+        << "Thread Switch, Core Switch, L1 Data Hits, L1 Data Misses, L1 Data Ratio, "
+        << "L1 Inst Hits, L1 Inst Misses, L1 Inst Ratio, LL Hits, LL Misses, LL Ratio\n";
+
+    cache_file.close();
 }
 
 bool
@@ -276,51 +266,33 @@ void
 missing_instructions_t::insert_new_row(const cachesim_row &row)
 {
     try {
-        std::unique_ptr<sql::mysql::MySQL_Driver> driver(
-            sql::mysql::get_mysql_driver_instance());
-        std::unique_ptr<sql::Connection> conn(
-            driver->connect("localhost", "root", ""));
-        conn->setSchema("cta");
+        // Open the CSV file in append mode
+        std::ofstream cache_stats_file(cache_stats_filename, std::ios::app);
 
-        std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
-            "INSERT INTO cache_stats ("
-            "access_address, pc_address, l1d_miss, l1i_miss, ll_miss, instr_type, "
-            "byte_count, disassembly_string, current_instruction_id, core, "
-            "thread_switch, core_switch, l1_data_hits, l1_data_misses, l1_data_ratio, "
-            "l1_inst_hits, l1_inst_misses, l1_inst_ratio, ll_hits, ll_misses, ll_ratio"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+        // Write the row data to the CSV file
+        cache_stats_file << current_instruction_id << ", " << row.get_access_address()
+                         << ", " << row.get_pc_address() << ", "
+                         << (row.get_l1d_miss() ? "TRUE" : "FALSE") << ", "
+                         << (row.get_l1i_miss() ? "TRUE" : "FALSE") << ", "
+                         << (row.get_ll_miss() ? "TRUE" : "FALSE") << ", "
+                         << row.get_instr_type() << ", "
+                         << static_cast<int>(row.get_byte_count()) << ", "
+                         << "\"" << row.get_disassembly_string()
+                         << "\", " // Enclosed in quotes in case of special characters
+                         << row.get_current_instruction_id() << ", " << row.get_core()
+                         << ", " << (row.get_thread_switch() ? "TRUE" : "FALSE") << ", "
+                         << (row.get_core_switch() ? "TRUE" : "FALSE") << ", "
+                         << row.get_l1_data_hits() << ", " << row.get_l1_data_misses()
+                         << ", " << row.get_l1_data_ratio() << ", "
+                         << row.get_l1_inst_hits() << ", " << row.get_l1_inst_misses()
+                         << ", " << row.get_l1_inst_ratio() << ", " << row.get_ll_hits()
+                         << ", " << row.get_ll_misses() << ", " << row.get_ll_ratio()
+                         << "\n";
 
-        // Assuming `row` is an instance of cachesim_row and `conn` is a valid
-        // sql::Connection pointer.
-        pstmt->setString(1, row.get_access_address());
-        pstmt->setString(2, row.get_pc_address());
-        pstmt->setBoolean(3, row.get_l1d_miss());
-        pstmt->setBoolean(4, row.get_l1i_miss());
-        pstmt->setBoolean(5, row.get_ll_miss());
-        pstmt->setString(6, row.get_instr_type());
-        pstmt->setInt(7, static_cast<int>(row.get_byte_count()));
-        pstmt->setString(8, row.get_disassembly_string());
-        pstmt->setInt(9, row.get_current_instruction_id());
-        pstmt->setInt(10, row.get_core());
-        pstmt->setBoolean(11, row.get_thread_switch());
-        pstmt->setBoolean(12, row.get_core_switch());
-        pstmt->setInt(13, row.get_l1_data_hits());
-        pstmt->setInt(14, row.get_l1_data_misses());
-        pstmt->setDouble(15, static_cast<double>(row.get_l1_data_ratio()));
-        pstmt->setInt(16, row.get_l1_inst_hits());
-        pstmt->setInt(17, row.get_l1_inst_misses());
-        pstmt->setDouble(18, static_cast<double>(row.get_l1_inst_ratio()));
-        pstmt->setInt(19, row.get_ll_hits());
-        pstmt->setInt(20, row.get_ll_misses());
-        pstmt->setDouble(21, static_cast<double>(row.get_ll_ratio()));
-
-        // Execute the prepared statement
-        pstmt->executeUpdate();
-
-        std::cerr << "How far: " << row.get_current_instruction_id() << std::endl;
-    } catch (sql::SQLException &e) {
-        std::cerr << "SQLException: " << e.what();
-        throw e;
+        cache_stats_file.close();
+    } catch (const std::exception &e) {
+        std::cerr << "Exception: " << e.what();
+        throw;
     }
 }
 
@@ -389,9 +361,12 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
     }
 
     std::stringstream ss;
-    ss << std::hex << addr;
+    ss << std::setfill('0') << std::setw(16) << std::hex << addr; // Pad to 16 characters
     std::string address_hex = ss.str();
-    ss << std::hex << pc;
+    ss.str("");
+    ss.clear();
+
+    ss << std::setfill('0') << std::setw(16) << std::hex << pc; // Pad to 16 characters
     std::string pc_hex = ss.str();
 
     row.set_pc_address(pc_hex);
