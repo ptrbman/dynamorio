@@ -53,8 +53,6 @@
 #include "memtrace_stream.h"
 #include <fstream>
 #include <ctime>
-#include <lz4.h>
-#include <lz4hc.h>
 #include <sys/stat.h>
 // #include "raw2trace.h"
 // #include "raw2trace_directory.h"
@@ -252,7 +250,7 @@ missing_instructions_t::process_memref(const memref_t &memref)
                 core_switch = true;
             last_core_index_ = core;
         }
-        if (current_instruction_id % 1000 == 0)
+        if (current_instruction_id % 10000 == 0)
             std::cerr << "Doing " << current_instruction_id << std::endl;
         std::unique_ptr<cachesim_row> row(new cachesim_row());
 
@@ -271,8 +269,8 @@ missing_instructions_t::insert_new_row(const cachesim_row &row)
 {
     try {
 
-        if (current_instruction_id % 100000 == 0)
-            splitAndCompress(cache_stats_filename, 10000000);
+        // if (current_instruction_id % 100000 == 0)
+        //     splitAndCompress(cache_stats_filename, 10000000);
         // Open the CSV file in append mode
         std::ofstream cache_stats_file(cache_stats_filename, std::ios::app);
 
@@ -430,12 +428,12 @@ missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
 bool
 missing_instructions_t::print_results()
 {
-    // Before exiting the main function, delete the CSV file
-    if (remove(cache_stats_filename.c_str()) != 0) {
-        perror("Error deleting file");
-    } else {
-        std::cout << "File successfully deleted" << std::endl;
-    }
+    // // Before exiting the main function, delete the CSV file
+    // if (remove(cache_stats_filename.c_str()) != 0) {
+    //     perror("Error deleting file");
+    // } else {
+    //     std::cout << "File successfully deleted" << std::endl;
+    // }
     std::cerr << TOOL_NAME << " results:\n";
     cache_simulator_t::print_results();
     // std::cerr << std::setw(15) << num_disasm_instrs_ << " : total instructions\n";
@@ -451,44 +449,37 @@ missing_instructions_t::getFileSize(const std::string &fileName)
     return rc == 0 ? stat_buf.st_size : -1;
 }
 
-// Function to split and compress the file using LZ4
-void
-missing_instructions_t::splitAndCompress(const std::string &fileName, int max_size)
-{
+// Function to split and compress the file using gzip
+void missing_instructions_t::splitAndCompress(const std::string &fileName, int max_size) {
     std::ifstream file(fileName, std::ios::binary);
-    std::string line;
+    std::vector<char> buffer(max_size);
     int fileCount = 0;
-    long fileSize = 0;
 
-    std::ofstream outFile;
-    while (getline(file, line)) {
-        if (fileSize == 0) {
+    while (!file.eof()) {
+        file.read(buffer.data(), max_size);
+        std::streamsize bytesRead = file.gcount();
+
+        if (bytesRead > 0) {
             std::stringstream ss;
-            ss << fileName << "_" << fileCount << ".part.lz4";
-            outFile.open(ss.str(), std::ios::binary);
+            ss << fileName << "_" << fileCount << ".part.gz";
+            std::ofstream outFile(ss.str(), std::ios::binary);
+
+            outFile.write(buffer.data(), bytesRead);
+            outFile.close();
+
+            std::stringstream gzipCommand;
+            gzipCommand << "gzip -f" << ss.str();
+            int result = system(gzipCommand.str().c_str());
+            if (result != 0) {
+                std::cerr << "gzip compression failed for " << ss.str() << " with return code " << result << std::endl;
+                // Handle the error, maybe clean up or exit, depending on your requirements
+            }
+
             fileCount++;
         }
-
-        // LZ4 compression logic here
-        char *compressedData = new char[LZ4_compressBound(line.size())];
-        int compressedSize = LZ4_compress_default(
-            line.c_str(), compressedData, line.size(), LZ4_compressBound(line.size()));
-
-        outFile.write(compressedData, compressedSize);
-        delete[] compressedData;
-        fileSize += compressedSize;
-
-        if (fileSize >= max_size) {
-            outFile.close();
-            fileSize = 0;
-        }
     }
-    if (outFile.is_open()) {
-        outFile.close();
-    }
-
     file.close();
-    // // Optionally remove the original file or rename it
+    // Optionally remove the original file or rename it
     // std::remove(fileName.c_str());
 }
 
