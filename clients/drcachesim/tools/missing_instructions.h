@@ -130,6 +130,8 @@ private:
     update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
     insert_new_row(const cachesim_row &row);
+    long getFileSize(const std::string& fileName);
+    void splitAndCompress(const std::string& fileName, int max_size);
     std::string cache_stats_filename;
     std::string experiments_filename = "experiments.csv";
 };
