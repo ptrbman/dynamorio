@@ -38,9 +38,6 @@
 
 #include "dr_api.h"
 #include "missing_instructions.h"
-// #include <mysql_driver.h>
-// #include <mysql_connection.h>
-// #include <cppconn/prepared_statement.h>
 
 #include <algorithm>
 #include <iomanip>
@@ -55,9 +52,6 @@
 #include <ctime>
 #include <zlib.h>
 #include <sys/stat.h>
-// #include "raw2trace.h"
-// #include "raw2trace_directory.h"
-// #include "utils.h"
 
 namespace dynamorio {
 namespace drmemtrace {
@@ -261,76 +255,6 @@ missing_instructions_t::process_memref(const memref_t &memref)
         return false;
     }
 }
-
-// void
-// missing_instructions_t::insert_new_row(const cachesim_row &row)
-// {
-//     try {
-
-//         // if (current_instruction_id % 100000 == 0)
-//         //     splitAndCompress(cache_stats_filename, 10000000);
-//         // Open the CSV file in append mode
-//         std::ofstream cache_stats_file(cache_stats_filename, std::ios::app);
-
-//         // Write the row data to the CSV file
-//         cache_stats_file << current_instruction_id << ", " << row.get_access_address()
-//                          << ", " << row.get_pc_address() << ", "
-//                          << (row.get_l1d_miss() ? 1 : 0) << ", "
-//                          << (row.get_l1i_miss() ? 1 : 0) << ", "
-//                          << (row.get_ll_miss() ? 1 : 0) << ", "
-//                          << row.get_instr_type() << ", "
-//                          << static_cast<int>(row.get_byte_count()) << ", "
-//                          << "\"" << row.get_disassembly_string()
-//                          << "\", " // Enclosed in quotes in case of special characters
-//                          << row.get_current_instruction_id() << ", " << row.get_core()
-//                          << ", " << (row.get_thread_switch() ? 1 :0) << ", "
-//                          << (row.get_core_switch() ? 1 : 0) << ", "
-//                          << row.get_l1_data_hits() << ", " << row.get_l1_data_misses()
-//                          << ", " << row.get_l1_data_ratio() << ", "
-//                          << row.get_l1_inst_hits() << ", " << row.get_l1_inst_misses()
-//                          << ", " << row.get_l1_inst_ratio() << ", " <<
-//                          row.get_ll_hits()
-//                          << ", " << row.get_ll_misses() << ", " << row.get_ll_ratio()
-//                          << "\n";
-
-//         cache_stats_file.close();
-//     } catch (const std::exception &e) {
-//         std::cerr << "Exception: " << e.what();
-//         throw;
-//     }
-// }
-
-// void
-// missing_instructions_t::insert_new_row(const cachesim_row &row)
-// {
-//     try {
-
-//         // Construct the row data as a string
-//         std::stringstream ss;
-//         ss << current_instruction_id << ", " << row.get_access_address() << ", "
-//            << row.get_pc_address() << ", " << (row.get_l1d_miss() ? 1 : 0) << ", "
-//            << (row.get_l1i_miss() ? 1 : 0) << ", " << (row.get_ll_miss() ? 1 : 0) << ",
-//            "
-//            << row.get_instr_type() << ", " << static_cast<int>(row.get_byte_count())
-//            << ", "
-//            << "\"" << row.get_disassembly_string() << "\", "
-//            << row.get_current_instruction_id() << ", " << row.get_core() << ", "
-//            << (row.get_thread_switch() ? 1 : 0) << ", " << (row.get_core_switch() ? 1 :
-//            0)
-//            << ", " << row.get_l1_data_hits() << ", " << row.get_l1_data_misses() << ",
-//            "
-//            << row.get_l1_data_ratio() << ", " << row.get_l1_inst_hits() << ", "
-//            << row.get_l1_inst_misses() << ", " << row.get_l1_inst_ratio() << ", "
-//            << row.get_ll_hits() << ", " << row.get_ll_misses() << ", "
-//            << row.get_ll_ratio() << "\n";
-
-//         // Write the constructed string to the compressed file
-//         write_compressed_row(ss.str());
-//     } catch (const std::exception &e) {
-//         std::cerr << "Exception: " << e.what();
-//         throw;
-//     }
-// }
 
 void
 missing_instructions_t::write_csv_header()
@@ -541,15 +465,8 @@ missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
 bool
 missing_instructions_t::print_results()
 {
-    // // Before exiting the main function, delete the CSV file
-    // if (remove(cache_stats_filename.c_str()) != 0) {
-    //     perror("Error deleting file");
-    // } else {
-    //     std::cout << "File successfully deleted" << std::endl;
-    // }
     std::cerr << TOOL_NAME << " results:\n";
     cache_simulator_t::print_results();
-    // std::cerr << std::setw(15) << num_disasm_instrs_ << " : total instructions\n";
     return true;
 }
 
@@ -561,44 +478,6 @@ missing_instructions_t::getFileSize(const std::string &fileName)
     int rc = stat(fileName.c_str(), &stat_buf);
     return rc == 0 ? stat_buf.st_size : -1;
 }
-
-// // Function to split and compress the file using gzip
-// void
-// missing_instructions_t::splitAndCompress(const std::string &fileName, int max_size)
-// {
-//     std::ifstream file(fileName, std::ios::binary);
-//     std::vector<char> buffer(max_size);
-//     int fileCount = 0;
-
-//     while (!file.eof()) {
-//         file.read(buffer.data(), max_size);
-//         std::streamsize bytesRead = file.gcount();
-
-//         if (bytesRead > 0) {
-//             std::stringstream ss;
-//             ss << fileName << "_" << fileCount << ".part.gz";
-//             std::ofstream outFile(ss.str(), std::ios::binary);
-
-//             outFile.write(buffer.data(), bytesRead);
-//             outFile.close();
-
-//             std::stringstream gzipCommand;
-//             gzipCommand << "gzip -f" << ss.str();
-//             int result = system(gzipCommand.str().c_str());
-//             if (result != 0) {
-//                 std::cerr << "gzip compression failed for " << ss.str()
-//                           << " with return code " << result << std::endl;
-//                 // Handle the error, maybe clean up or exit, depending on your
-//                 // requirements
-//             }
-
-//             fileCount++;
-//         }
-//     }
-//     file.close();
-//     // Optionally remove the original file or rename it
-//     // std::remove(fileName.c_str());
-// }
 
 void
 missing_instructions_t::open_compressed_output()
