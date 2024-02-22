@@ -111,7 +111,6 @@ protected:
         }
         void *dcontext = nullptr;
     };
-
     //     /* We make this the first field so that dr_standalone_exit() is called after
     //      * destroying the other fields which may use DR heap.
     //      */
