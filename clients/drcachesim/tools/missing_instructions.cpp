@@ -170,9 +170,9 @@ missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 
 missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &knobs)
     : cache_simulator_t(knobs)
+    , csv_log_path(knobs_.cache_trace_log_path)
 {
-    
-    csv_log_path = knobs_.cache_trace_log_path;
+
     std::cout << "Path for logging: " << csv_log_path << "\n";
     create_experiment_insert_statement(knobs_);
     curr_core_id = 0;
