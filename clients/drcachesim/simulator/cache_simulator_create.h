@@ -72,6 +72,7 @@ struct cache_simulator_knobs_t {
         , cpu_scheduling(false)
         , use_physical(false)
         , verbose(0)
+        , cache_trace_log_path("")
     {
     }
     unsigned int num_cores;
@@ -93,6 +94,7 @@ struct cache_simulator_knobs_t {
     bool cpu_scheduling;
     bool use_physical;
     unsigned int verbose;
+    std::string cache_trace_log_path;
 };
 
 /** Creates an instance of a cache simulator with a 2-level hierarchy. */

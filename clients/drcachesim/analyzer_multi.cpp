@@ -570,6 +570,7 @@ analyzer_multi_t::get_cache_simulator_knobs()
     knobs->verbose = op_verbose.get_value();
     knobs->cpu_scheduling = op_cpu_scheduling.get_value();
     knobs->use_physical = op_use_physical.get_value();
+    knobs->cache_trace_log_path = op_cache_trace_log_path.get_value();
     return knobs;
 }
 

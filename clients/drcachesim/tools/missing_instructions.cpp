@@ -53,6 +53,7 @@
 #include "memtrace_stream.h"
 #include <fstream>
 #include <ctime>
+#include <zlib.h>
 #include <sys/stat.h>
 // #include "raw2trace.h"
 // #include "raw2trace_directory.h"
@@ -74,8 +75,8 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
 
         std::string name;
         switch (memref.data.type) {
-        default: name = "entry_type_" + memref.data.type; return;
-        case TRACE_TYPE_THREAD_EXIT: name = "thread_exit"; return;
+        default: name = "entry_type_" + memref.data.type; break;
+        case TRACE_TYPE_THREAD_EXIT: name = "thread_exit"; break;
 
         case TRACE_TYPE_READ: name = "read"; break;
         case TRACE_TYPE_WRITE: name = "write"; break;
@@ -177,6 +178,8 @@ missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &kn
     : cache_simulator_t(knobs)
 {
     create_experiment_insert_statement(knobs);
+    std::cout << "Path for logging: " << csv_log_path;
+    csv_log_path = knobs.cache_trace_log_path;
 }
 
 void
@@ -187,6 +190,8 @@ missing_instructions_t::create_experiment_insert_statement(
     std::stringstream id_ss;
     id_ss << std::time(nullptr);
     std::string experiment_id = id_ss.str();
+
+    experiments_filename = csv_log_path + experiments_filename;
 
     // Create or open the experiments CSV file
     std::ofstream experiments_file(experiments_filename, std::ios::app);
@@ -206,16 +211,18 @@ missing_instructions_t::create_experiment_insert_statement(
                      << (knobs.L1I_size / 1024) << "K, " << knobs.num_cores << ", "
                      << knobs.L1I_assoc << ", " << knobs.L1D_assoc << ", "
                      << (knobs.LL_size / (1024 * 1024)) << "M, " << knobs.line_size
-                     << ", " << knobs.LL_assoc << ", "
-                     << (knobs.model_coherence ? "TRUE" : "FALSE") << ", "
+                     << ", " << knobs.LL_assoc << ", " << (knobs.model_coherence ? 1 : 0)
+                     << ", "
                      << "'" << knobs.replace_policy << "', " << knobs.skip_refs << ", "
                      << knobs.warmup_refs << ", " << knobs.warmup_fraction << ", " << 0
-                     << ", " // Assuming 0 for Sim Refs as per your method
-                     << (knobs.cpu_scheduling ? "TRUE" : "FALSE") << ", "
-                     << (knobs.use_physical ? "TRUE" : "FALSE") << "\n";
+                     << ", " // Assuming 0 for Sim Refs as per  method
+                     << (knobs.cpu_scheduling ? 1 : 0) << ", "
+                     << (knobs.use_physical ? 1 : 0) << "\n";
     experiments_file.close();
     // Open the corresponding cache statistics CSV file
-    cache_stats_filename = "cache_stats_" + experiment_id + ".csv";
+    cache_stats_filename = csv_log_path + "cache_stats_" + experiment_id + ".csv";
+    std::cerr << "Priting cache stats file to " << cache_stats_filename;
+
     std::ofstream cache_file(cache_stats_filename);
 
     // Write headers to the cache statistics CSV file
@@ -250,13 +257,13 @@ missing_instructions_t::process_memref(const memref_t &memref)
                 core_switch = true;
             last_core_index_ = core;
         }
-        if (current_instruction_id % 10000 == 0)
+        if (current_instruction_id % 100000 == 0)
             std::cerr << "Doing " << current_instruction_id << std::endl;
         std::unique_ptr<cachesim_row> row(new cachesim_row());
 
         update_instruction_stats(core, thread_switch, core_switch, memref, *row);
         update_miss_stats(core, memref, *row);
-        insert_new_row(*row);
+        write_compressed_row_with_delta(*row);
         return true;
     } catch (const std::exception &ex) {
         std::cerr << "Issue occurred during disassembly of trace: " << ex.what();
@@ -264,43 +271,134 @@ missing_instructions_t::process_memref(const memref_t &memref)
     }
 }
 
+// void
+// missing_instructions_t::insert_new_row(const cachesim_row &row)
+// {
+//     try {
+
+//         // if (current_instruction_id % 100000 == 0)
+//         //     splitAndCompress(cache_stats_filename, 10000000);
+//         // Open the CSV file in append mode
+//         std::ofstream cache_stats_file(cache_stats_filename, std::ios::app);
+
+//         // Write the row data to the CSV file
+//         cache_stats_file << current_instruction_id << ", " << row.get_access_address()
+//                          << ", " << row.get_pc_address() << ", "
+//                          << (row.get_l1d_miss() ? 1 : 0) << ", "
+//                          << (row.get_l1i_miss() ? 1 : 0) << ", "
+//                          << (row.get_ll_miss() ? 1 : 0) << ", "
+//                          << row.get_instr_type() << ", "
+//                          << static_cast<int>(row.get_byte_count()) << ", "
+//                          << "\"" << row.get_disassembly_string()
+//                          << "\", " // Enclosed in quotes in case of special characters
+//                          << row.get_current_instruction_id() << ", " << row.get_core()
+//                          << ", " << (row.get_thread_switch() ? 1 :0) << ", "
+//                          << (row.get_core_switch() ? 1 : 0) << ", "
+//                          << row.get_l1_data_hits() << ", " << row.get_l1_data_misses()
+//                          << ", " << row.get_l1_data_ratio() << ", "
+//                          << row.get_l1_inst_hits() << ", " << row.get_l1_inst_misses()
+//                          << ", " << row.get_l1_inst_ratio() << ", " <<
+//                          row.get_ll_hits()
+//                          << ", " << row.get_ll_misses() << ", " << row.get_ll_ratio()
+//                          << "\n";
+
+//         cache_stats_file.close();
+//     } catch (const std::exception &e) {
+//         std::cerr << "Exception: " << e.what();
+//         throw;
+//     }
+// }
+
+// void
+// missing_instructions_t::insert_new_row(const cachesim_row &row)
+// {
+//     try {
+
+//         // Construct the row data as a string
+//         std::stringstream ss;
+//         ss << current_instruction_id << ", " << row.get_access_address() << ", "
+//            << row.get_pc_address() << ", " << (row.get_l1d_miss() ? 1 : 0) << ", "
+//            << (row.get_l1i_miss() ? 1 : 0) << ", " << (row.get_ll_miss() ? 1 : 0) << ",
+//            "
+//            << row.get_instr_type() << ", " << static_cast<int>(row.get_byte_count())
+//            << ", "
+//            << "\"" << row.get_disassembly_string() << "\", "
+//            << row.get_current_instruction_id() << ", " << row.get_core() << ", "
+//            << (row.get_thread_switch() ? 1 : 0) << ", " << (row.get_core_switch() ? 1 :
+//            0)
+//            << ", " << row.get_l1_data_hits() << ", " << row.get_l1_data_misses() << ",
+//            "
+//            << row.get_l1_data_ratio() << ", " << row.get_l1_inst_hits() << ", "
+//            << row.get_l1_inst_misses() << ", " << row.get_l1_inst_ratio() << ", "
+//            << row.get_ll_hits() << ", " << row.get_ll_misses() << ", "
+//            << row.get_ll_ratio() << "\n";
+
+//         // Write the constructed string to the compressed file
+//         write_compressed_row(ss.str());
+//     } catch (const std::exception &e) {
+//         std::cerr << "Exception: " << e.what();
+//         throw;
+//     }
+// }
 void
-missing_instructions_t::insert_new_row(const cachesim_row &row)
+missing_instructions_t::write_compressed_row_with_delta(const cachesim_row &row)
 {
     try {
+        if (!gz_cache_file)
+            open_compressed_output();
+        // Reset last addresses on thread switch
+        if (row.get_thread_switch()) {
+            last_pc_address = 0;
+            last_access_address = 0;
+        }
+        // Convert addresses from string to numerical value for delta calculation
+        addr_t current_pc = std::stoull(row.get_pc_address(), nullptr, 16);
+        addr_t current_access = std::stoull(row.get_access_address(), nullptr, 16);
 
-        // if (current_instruction_id % 100000 == 0)
-        //     splitAndCompress(cache_stats_filename, 10000000);
-        // Open the CSV file in append mode
-        std::ofstream cache_stats_file(cache_stats_filename, std::ios::app);
+        // Calculate deltas with underflow check
+        int64_t delta_pc =
+            static_cast<int64_t>(current_pc) - static_cast<int64_t>(last_pc_address);
+        int64_t delta_access = static_cast<int64_t>(current_access) -
+            static_cast<int64_t>(last_access_address);
 
-        // Write the row data to the CSV file
-        cache_stats_file << current_instruction_id << ", " << row.get_access_address()
-                         << ", " << row.get_pc_address() << ", "
-                         << (row.get_l1d_miss() ? "TRUE" : "FALSE") << ", "
-                         << (row.get_l1i_miss() ? "TRUE" : "FALSE") << ", "
-                         << (row.get_ll_miss() ? "TRUE" : "FALSE") << ", "
-                         << row.get_instr_type() << ", "
-                         << static_cast<int>(row.get_byte_count()) << ", "
-                         << "\"" << row.get_disassembly_string()
-                         << "\", " // Enclosed in quotes in case of special characters
-                         << row.get_current_instruction_id() << ", " << row.get_core()
-                         << ", " << (row.get_thread_switch() ? "TRUE" : "FALSE") << ", "
-                         << (row.get_core_switch() ? "TRUE" : "FALSE") << ", "
-                         << row.get_l1_data_hits() << ", " << row.get_l1_data_misses()
-                         << ", " << row.get_l1_data_ratio() << ", "
-                         << row.get_l1_inst_hits() << ", " << row.get_l1_inst_misses()
-                         << ", " << row.get_l1_inst_ratio() << ", " << row.get_ll_hits()
-                         << ", " << row.get_ll_misses() << ", " << row.get_ll_ratio()
-                         << "\n";
+        // Handle potential underflow leading to large positive deltas
+        if (delta_pc < -std::numeric_limits<int32_t>::max() ||
+            delta_pc > std::numeric_limits<int32_t>::max()) {
+            delta_pc = 0; // Reset delta if underflow is detected or the delta is
+                          // unreasonably large
+        }
+        if (delta_access < -std::numeric_limits<int32_t>::max() ||
+            delta_access > std::numeric_limits<int32_t>::max()) {
+            delta_access = 0; // Reset delta if underflow is detected or the delta is
+                              // unreasonably large
+        }
 
-        cache_stats_file.close();
+        // Update last addresses
+        last_pc_address = current_pc;
+        last_access_address = current_access;
+
+        // Construct the output row with deltas
+        std::stringstream ss;
+        ss << current_instruction_id << ", " << delta_access << ", " << delta_pc << ", "
+           << (row.get_l1d_miss() ? 1 : 0) << ", " << (row.get_l1i_miss() ? 1 : 0) << ", "
+           << (row.get_ll_miss() ? 1 : 0) << ", " << row.get_instr_type() << ", "
+           << static_cast<int>(row.get_byte_count()) << ", "
+           << "\"" << row.get_disassembly_string() << "\", "
+           << row.get_current_instruction_id() << ", " << row.get_core() << ", "
+           << (row.get_thread_switch() ? 1 : 0) << ", " << (row.get_core_switch() ? 1 : 0)
+           << ", " << row.get_l1_data_hits() << ", " << row.get_l1_data_misses() << ", "
+           << row.get_l1_data_ratio() << ", " << row.get_l1_inst_hits() << ", "
+           << row.get_l1_inst_misses() << ", " << row.get_l1_inst_ratio() << ", "
+           << row.get_ll_hits() << ", " << row.get_ll_misses() << ", "
+           << row.get_ll_ratio();
+
+        // Write the constructed string to the compressed file
+        write_compressed_row(ss.str());
     } catch (const std::exception &e) {
         std::cerr << "Exception: " << e.what();
         throw;
     }
 }
-
 void
 missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
                                           cachesim_row &row)
@@ -382,7 +480,7 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
 
     get_opcode(memref, row);
 
-    insert_new_row(row);
+    write_compressed_row_with_delta(row);
 }
 
 void
@@ -449,38 +547,84 @@ missing_instructions_t::getFileSize(const std::string &fileName)
     return rc == 0 ? stat_buf.st_size : -1;
 }
 
-// Function to split and compress the file using gzip
-void missing_instructions_t::splitAndCompress(const std::string &fileName, int max_size) {
-    std::ifstream file(fileName, std::ios::binary);
-    std::vector<char> buffer(max_size);
-    int fileCount = 0;
+// // Function to split and compress the file using gzip
+// void
+// missing_instructions_t::splitAndCompress(const std::string &fileName, int max_size)
+// {
+//     std::ifstream file(fileName, std::ios::binary);
+//     std::vector<char> buffer(max_size);
+//     int fileCount = 0;
 
-    while (!file.eof()) {
-        file.read(buffer.data(), max_size);
-        std::streamsize bytesRead = file.gcount();
+//     while (!file.eof()) {
+//         file.read(buffer.data(), max_size);
+//         std::streamsize bytesRead = file.gcount();
 
-        if (bytesRead > 0) {
-            std::stringstream ss;
-            ss << fileName << "_" << fileCount << ".part.gz";
-            std::ofstream outFile(ss.str(), std::ios::binary);
+//         if (bytesRead > 0) {
+//             std::stringstream ss;
+//             ss << fileName << "_" << fileCount << ".part.gz";
+//             std::ofstream outFile(ss.str(), std::ios::binary);
 
-            outFile.write(buffer.data(), bytesRead);
-            outFile.close();
+//             outFile.write(buffer.data(), bytesRead);
+//             outFile.close();
 
-            std::stringstream gzipCommand;
-            gzipCommand << "gzip -f" << ss.str();
-            int result = system(gzipCommand.str().c_str());
-            if (result != 0) {
-                std::cerr << "gzip compression failed for " << ss.str() << " with return code " << result << std::endl;
-                // Handle the error, maybe clean up or exit, depending on your requirements
-            }
+//             std::stringstream gzipCommand;
+//             gzipCommand << "gzip -f" << ss.str();
+//             int result = system(gzipCommand.str().c_str());
+//             if (result != 0) {
+//                 std::cerr << "gzip compression failed for " << ss.str()
+//                           << " with return code " << result << std::endl;
+//                 // Handle the error, maybe clean up or exit, depending on your
+//                 // requirements
+//             }
 
-            fileCount++;
-        }
+//             fileCount++;
+//         }
+//     }
+//     file.close();
+//     // Optionally remove the original file or rename it
+//     // std::remove(fileName.c_str());
+// }
+
+void
+missing_instructions_t::open_compressed_output()
+{
+    std::string compressed_filename = cache_stats_filename + ".gz";
+    gz_cache_file = gzopen(compressed_filename.c_str(), "wb");
+    if (!gz_cache_file) {
+        throw std::runtime_error("Failed to open compressed output file");
     }
-    file.close();
-    // Optionally remove the original file or rename it
-    // std::remove(fileName.c_str());
+}
+
+void
+missing_instructions_t::write_compressed_row(const std::string &row)
+{
+    // Append the new row to the buffer
+    write_buffer += row + "\n"; // Ensure newline is included
+
+    // Check if buffer exceeds threshold and needs flushing
+    if (write_buffer.size() >= buffer_threshold) {
+        flush_buffer();
+    }
+}
+
+void
+missing_instructions_t::flush_buffer()
+{
+    if (!write_buffer.empty()) {
+        // Write buffer to compressed file
+        gzwrite(gz_cache_file, write_buffer.data(), write_buffer.size());
+        write_buffer.clear(); // Reset buffer after writing
+    }
+}
+
+void
+missing_instructions_t::close_compressed_output()
+{
+    flush_buffer(); // Flush any remaining data in the buffer
+    if (gz_cache_file) {
+        gzclose(gz_cache_file); // Close the gzFile resource
+        gz_cache_file = nullptr;
+    }
 }
 
 } // namespace drmemtrace
