@@ -178,8 +178,9 @@ missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &kn
     : cache_simulator_t(knobs)
 {
     create_experiment_insert_statement(knobs);
-    std::cout << "Path for logging: " << csv_log_path;
+    std::cout << "Path for logging: " << csv_log_path << "\n";
     csv_log_path = knobs.cache_trace_log_path;
+    curr_core_id = 0;
 }
 
 void
@@ -221,19 +222,9 @@ missing_instructions_t::create_experiment_insert_statement(
     experiments_file.close();
     // Open the corresponding cache statistics CSV file
     cache_stats_filename = csv_log_path + "cache_stats_" + experiment_id + ".csv";
-    std::cerr << "Priting cache stats file to " << cache_stats_filename;
+    std::cerr << "Printing cache stats file to " << cache_stats_filename << "\n";
 
-    std::ofstream cache_file(cache_stats_filename);
-
-    // Write headers to the cache statistics CSV file
-    cache_file
-        << "Instruction number, Access Address, PC Address, L1D Miss, L1I Miss, LL Miss, "
-           "Instr Type, "
-        << "Byte Count, Disassembly String, Current Instruction ID, Core, "
-        << "Thread Switch, Core Switch, L1 Data Hits, L1 Data Misses, L1 Data Ratio, "
-        << "L1 Inst Hits, L1 Inst Misses, L1 Inst Ratio, LL Hits, LL Misses, LL Ratio\n";
-
-    cache_file.close();
+    write_csv_header();
 }
 
 bool
@@ -340,6 +331,30 @@ missing_instructions_t::process_memref(const memref_t &memref)
 //         throw;
 //     }
 // }
+
+void
+missing_instructions_t::write_csv_header()
+{
+    try {
+        if (!gz_cache_file)
+            open_compressed_output();
+
+        // Construct the output row with deltas
+        std::stringstream ss;
+        ss << "Instruction number, Access Address, PC Address, L1D Miss, L1I Miss, LL "
+              "Miss, "
+              "Instr Type, "
+           << "Byte Count, Disassembly String, Current Instruction ID, Core, "
+           << "Thread Switch, Core Switch, L1 Data Hits, L1 Data Misses, L1 Data Ratio, "
+           << "L1 Inst Hits, L1 Inst Misses, L1 Inst Ratio, LL Hits, LL Misses, LL Ratio";
+
+        // Write the constructed string to the compressed file
+        write_compressed_row(ss.str());
+    } catch (const std::exception &e) {
+        std::cerr << "Exception: " << e.what();
+        throw;
+    }
+}
 void
 missing_instructions_t::write_compressed_row_with_delta(const cachesim_row &row)
 {

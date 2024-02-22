@@ -56,9 +56,11 @@ public:
     // XXX: Once we update our toolchains to guarantee C++17 support we could use
     // std::optional here.
 
-    void get_opcode(const memref_t &memref, cachesim_row &row);
+    void
+    get_opcode(const memref_t &memref, cachesim_row &row);
     // Destructor to ensure the file is closed
-    ~missing_instructions_t() {
+    ~missing_instructions_t()
+    {
         flush_buffer(); // Ensure buffer is flushed upon destruction
         if (gz_cache_file) {
             gzclose(gz_cache_file); // Close the gzFile resource
@@ -125,26 +127,35 @@ private:
     int current_instruction_id = 0;
     uintptr_t curr_core_id;
     memref_tid_t curr_thread_id;
-    int last_experiment_id;
     int
     insert_new_experiment(const cache_simulator_knobs_t &knobs);
     void
     create_experiment_insert_statement(const cache_simulator_knobs_t &knobs);
     void
     update_instruction_stats(int core, bool thread_switch, bool core_switch,
-                      const memref_t &memref, cachesim_row &row);
+                             const memref_t &memref, cachesim_row &row);
+
+    void
+    write_csv_header();
     void
     update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
     insert_new_row(const cachesim_row &row);
-    void write_compressed_row_with_delta(const cachesim_row& row);
+    void
+    write_compressed_row_with_delta(const cachesim_row &row);
 
-    long getFileSize(const std::string& fileName);
-    void splitAndCompress(const std::string& fileName, int max_size);
-    void open_compressed_output();
-    void write_compressed_row(const std::string& row);
-    void close_compressed_output();
-    void flush_buffer();
+    long
+    getFileSize(const std::string &fileName);
+    void
+    splitAndCompress(const std::string &fileName, int max_size);
+    void
+    open_compressed_output();
+    void
+    write_compressed_row(const std::string &row);
+    void
+    close_compressed_output();
+    void
+    flush_buffer();
     std::string cache_stats_filename;
     std::string experiments_filename = "experiments.csv";
     std::string csv_log_path = "";
@@ -152,8 +163,8 @@ private:
     addr_t last_pc_address = 0;
     addr_t last_access_address = 0;
     std::string write_buffer; // Accumulates data to be written
-    const size_t buffer_threshold = 1024 * 1024 * 500; // 500 MB buffer size, adjust as needed
-
+    const size_t buffer_threshold =
+        1024 * 1024 * 500; // 500 MB buffer size, adjust as needed
 };
 
 } // namespace drmemtrace
