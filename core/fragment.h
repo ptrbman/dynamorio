@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2012-2021 Google, Inc.  All rights reserved.
+ * Copyright (c) 2012-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2000-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -138,6 +138,12 @@
 #define FRAG_TEMP_PRIVATE 0x2000000
 
 #define FRAG_TRACE_OUTPUT 0x4000000
+/* Used only during block building, which means there is no conflict with
+ * FRAG_TRACE_OUTPUT.
+ */
+#ifdef LINUX
+#    define FRAG_STARTS_RSEQ_REGION 0x4000000
+#endif
 
 #define FRAG_CBR_FALLTHROUGH_SHORT 0x8000000
 
@@ -185,8 +191,10 @@
 #define FRAG_ISA_MODE(flags)                                                        \
     IF_X86_ELSE(                                                                    \
         IF_X64_ELSE((FRAG_IS_32(flags)) ? DR_ISA_IA32 : DR_ISA_AMD64, DR_ISA_IA32), \
-        IF_X64_ELSE(DR_ISA_ARM_A64,                                                 \
-                    (TEST(FRAG_THUMB, (flags)) ? DR_ISA_ARM_THUMB : DR_ISA_ARM_A32)))
+        IF_AARCHXX_ELSE(IF_X64_ELSE(DR_ISA_ARM_A64,                                 \
+                                    (TEST(FRAG_THUMB, (flags)) ? DR_ISA_ARM_THUMB   \
+                                                               : DR_ISA_ARM_A32)),  \
+                        DR_ISA_RV64IMAFDC))
 
 static inline uint
 frag_flags_from_isa_mode(dr_isa_mode_t mode)
@@ -216,11 +224,14 @@ frag_flags_from_isa_mode(dr_isa_mode_t mode)
 }
 
 /* to save space size field is a ushort => maximum fragment size */
-#ifndef AARCH64
-enum { MAX_FRAGMENT_SIZE = USHRT_MAX };
-#else
+#ifdef AARCH64
 /* On AArch64, TBNZ/TBZ has a range of +/- 32 KiB. */
 enum { MAX_FRAGMENT_SIZE = 0x8000 };
+#elif defined(RISCV64)
+/* On RISCV64, direct branch has a range of +/- 4 KiB. */
+enum { MAX_FRAGMENT_SIZE = 0x1000 };
+#else
+enum { MAX_FRAGMENT_SIZE = USHRT_MAX };
 #endif
 
 /* fragment structure used for basic blocks and traces

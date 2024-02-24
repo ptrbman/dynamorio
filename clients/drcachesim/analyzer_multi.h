@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2016-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2016-2023 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -38,6 +38,12 @@
 #define _ANALYZER_MULTI_H_ 1
 
 #include "analyzer.h"
+#include "archive_ostream.h"
+#include "scheduler.h"
+#include "simulator/cache_simulator_create.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 class analyzer_multi_t : public analyzer_t {
 public:
@@ -47,6 +53,8 @@ public:
     virtual ~analyzer_multi_t();
 
 protected:
+    scheduler_t::scheduler_options_t
+    init_dynamic_schedule();
     bool
     create_analysis_tools();
     bool
@@ -54,10 +62,41 @@ protected:
     void
     destroy_analysis_tools();
 
+    analysis_tool_t *
+    create_analysis_tool_from_options(const std::string &type);
+
+    analysis_tool_t *
+    create_external_tool(const std::string &id);
+
+    analysis_tool_t *
+    create_invariant_checker();
+
+    std::string
+    get_aux_file_path(std::string option_val, std::string default_filename);
+
+    std::string
+    get_module_file_path();
+
+    /* Get the cache simulator knobs used by the cache simulator
+     * and the cache miss analyzer.
+     */
+    cache_simulator_knobs_t *
+    get_cache_simulator_knobs();
+
     std::unique_ptr<std::istream> serial_schedule_file_;
+    // This is read in a single stream by invariant_checker and so is not
+    // an archive_istream_t.
     std::unique_ptr<std::istream> cpu_schedule_file_;
+    std::vector<class external_tool_creator_t> loaders_;
+    // This is read as an archive and can read the same file if both are set.
+    std::unique_ptr<archive_istream_t> cpu_schedule_zip_;
+    std::unique_ptr<archive_ostream_t> record_schedule_zip_;
+    std::unique_ptr<archive_istream_t> replay_schedule_zip_;
 
     static const int max_num_tools_ = 8;
 };
+
+} // namespace drmemtrace
+} // namespace dynamorio
 
 #endif /* _ANALYZER_MULTI_H_ */

@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2022-2023 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -44,6 +44,14 @@
 #include <inttypes.h>
 #include <fstream>
 #include <vector>
+
+namespace dynamorio {
+namespace drmemtrace {
+
+using ::dynamorio::droption::droption_parser_t;
+using ::dynamorio::droption::DROPTION_SCOPE_ALL;
+using ::dynamorio::droption::DROPTION_SCOPE_FRONTEND;
+using ::dynamorio::droption::droption_t;
 
 #define FATAL_ERROR(msg, ...)                               \
     do {                                                    \
@@ -194,7 +202,8 @@ test_cache_and_type_filter()
         { { TRACE_TYPE_MARKER,
             TRACE_MARKER_TYPE_FILETYPE,
             { OFFLINE_FILE_TYPE_NO_OPTIMIZATIONS | OFFLINE_FILE_TYPE_ENCODINGS |
-              OFFLINE_FILE_TYPE_DFILTERED | OFFLINE_FILE_TYPE_IFILTERED } },
+              OFFLINE_FILE_TYPE_DFILTERED | OFFLINE_FILE_TYPE_IFILTERED |
+              OFFLINE_FILE_TYPE_BIMODAL_FILTERED_WARMUP } },
           false,
           { false, true } },
         { { TRACE_TYPE_THREAD, 0, { 0x4 } }, true, { true, true } },
@@ -213,14 +222,13 @@ test_cache_and_type_filter()
         { { TRACE_TYPE_INSTR, 4, { 0xaa00 } }, true, { true, true } },
         { { TRACE_TYPE_WRITE, 4, { 0xaa80 } }, true, { true, true } },
 
-        // Unit header. For the 1st test, this is skipped, since no entry
-        // is output from this unit.
+        // Unit header.
         { { TRACE_TYPE_MARKER, TRACE_MARKER_TYPE_TIMESTAMP, { 0x9 } },
           true,
-          { false, true } },
+          { true, true } },
         { { TRACE_TYPE_MARKER, TRACE_MARKER_TYPE_CPU_ID, { 0xa } },
           true,
-          { false, true } },
+          { true, true } },
         // Filtered out by cache_filter.
         { { TRACE_TYPE_WRITE, 4, { 0xaa90 } }, true, { false, false } },
         // For the 1st test: filtered out by type_filter.
@@ -334,7 +342,7 @@ test_cache_and_type_filter()
             return false;
         }
 
-        // Proccess each trace entry.
+        // Process each trace entry.
         for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
             // We need to emulate the stream for the tool.
             if (entries[i].entry.type == TRACE_TYPE_MARKER &&
@@ -403,9 +411,14 @@ test_null_filter()
         std::unique_ptr<dynamorio::drmemtrace::record_filter_t::record_filter_func_t>>
         filter_funcs;
     filter_funcs.push_back(std::move(null_filter));
+    // We use a very small stop_timestamp for the record filter. This is to verify that
+    // we emit the TRACE_MARKER_TYPE_FILTER_ENDPOINT marker for each thread even if it
+    // starts after the given stop_timestamp. Since the stop_timestamp is so small, all
+    // other entries are expected to stay.
+    static constexpr uint64_t stop_timestamp_us = 1;
     auto record_filter = std::unique_ptr<dynamorio::drmemtrace::record_filter_t>(
         new dynamorio::drmemtrace::record_filter_t(output_dir, std::move(filter_funcs),
-                                                   /*stop_timestamp_us=*/0,
+                                                   stop_timestamp_us,
                                                    /*verbosity=*/0));
     std::vector<record_analysis_tool_t *> tools;
     tools.push_back(record_filter.get());
@@ -421,6 +434,8 @@ test_null_filter()
     }
 
     basic_counts_t::counters_t c1 = get_basic_counts(op_trace_dir.get_value());
+    // We expect one extra marker (TRACE_MARKER_TYPE_FILTER_ENDPOINT) for each thread.
+    c1.other_markers += c1.shard_count;
     basic_counts_t::counters_t c2 = get_basic_counts(output_dir);
     CHECK(c1.instrs != 0, "Bad input trace\n");
     CHECK(c1 == c2, "Null filter returned different counts\n");
@@ -429,7 +444,7 @@ test_null_filter()
 }
 
 int
-main(int argc, const char *argv[])
+test_main(int argc, const char *argv[])
 {
     std::string parse_err;
     if (!droption_parser_t::parse_argv(DROPTION_SCOPE_FRONTEND, argc, (const char **)argv,
@@ -445,3 +460,6 @@ main(int argc, const char *argv[])
     fprintf(stderr, "All done!\n");
     return 0;
 }
+
+} // namespace drmemtrace
+} // namespace dynamorio

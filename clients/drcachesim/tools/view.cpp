@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2017-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2017-2023 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -36,31 +36,47 @@
  * It does not support online use, only offline.
  */
 
-#include "dr_api.h"
 #include "view.h"
-#include <algorithm>
+
+#include <stdint.h>
+
 #include <iomanip>
 #include <iostream>
-#include <vector>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+
+#include "analysis_tool.h"
+#include "dr_api.h"
+#include "memref.h"
+#include "memtrace_stream.h"
+#include "raw2trace.h"
+#include "raw2trace_directory.h"
+#include "trace_entry.h"
+#include "utils.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 const std::string view_t::TOOL_NAME = "View tool";
 
 analysis_tool_t *
-view_tool_create(const std::string &module_file_path, memref_tid_t thread,
-                 uint64_t skip_refs, uint64_t sim_refs, const std::string &syntax,
-                 unsigned int verbose, const std::string &alt_module_dir)
+view_tool_create(const std::string &module_file_path, uint64_t skip_refs,
+                 uint64_t sim_refs, const std::string &syntax, unsigned int verbose,
+                 const std::string &alt_module_dir)
 {
-    return new view_t(module_file_path, thread, skip_refs, sim_refs, syntax, verbose,
+    return new view_t(module_file_path, skip_refs, sim_refs, syntax, verbose,
                       alt_module_dir);
 }
 
-view_t::view_t(const std::string &module_file_path, memref_tid_t thread,
-               uint64_t skip_refs, uint64_t sim_refs, const std::string &syntax,
-               unsigned int verbose, const std::string &alt_module_dir)
+view_t::view_t(const std::string &module_file_path, uint64_t skip_refs, uint64_t sim_refs,
+               const std::string &syntax, unsigned int verbose,
+               const std::string &alt_module_dir)
     : module_file_path_(module_file_path)
     , knob_verbose_(verbose)
     , trace_version_(-1)
-    , knob_thread_(thread)
     , knob_skip_refs_(skip_refs)
     , skip_refs_left_(knob_skip_refs_)
     , knob_sim_refs_(sim_refs)
@@ -102,14 +118,17 @@ view_t::initialize_stream(memtrace_stream_t *serial_stream)
     std::string error = module_mapper_->get_last_error();
     if (!error.empty())
         return "Failed to load binaries: " + error;
-    dr_disasm_flags_t flags =
-        IF_X86_ELSE(DR_DISASM_ATT, IF_AARCH64_ELSE(DR_DISASM_DR, DR_DISASM_ARM));
+    dr_disasm_flags_t flags = IF_X86_ELSE(
+        DR_DISASM_ATT,
+        IF_AARCH64_ELSE(DR_DISASM_DR, IF_RISCV64_ELSE(DR_DISASM_RISCV, DR_DISASM_ARM)));
     if (knob_syntax_ == "intel") {
         flags = DR_DISASM_INTEL;
     } else if (knob_syntax_ == "dr") {
         flags = DR_DISASM_DR;
     } else if (knob_syntax_ == "arm") {
         flags = DR_DISASM_ARM;
+    } else if (knob_syntax_ == "riscv") {
+        flags = DR_DISASM_RISCV;
     }
     disassemble_set_syntax(flags);
     return "";
@@ -118,9 +137,7 @@ view_t::initialize_stream(memtrace_stream_t *serial_stream)
 bool
 view_t::parallel_shard_supported()
 {
-    // When just one thread is selected, we support parallel operation to reduce
-    // overhead from reading all the other thread files in series.
-    return knob_thread_ > 0;
+    return false;
 }
 
 void *
@@ -178,8 +195,6 @@ bool
 view_t::parallel_shard_memref(void *shard_data, const memref_t &memref)
 {
     memtrace_stream_t *memstream = reinterpret_cast<memtrace_stream_t *>(shard_data);
-    if (knob_thread_ > 0 && memref.data.tid > 0 && memref.data.tid != knob_thread_)
-        return true;
     // Even for -skip_refs we need to process the up-front version and type.
     if (memref.marker.type == TRACE_TYPE_MARKER) {
         switch (memref.marker.marker_type) {
@@ -310,6 +325,10 @@ view_t::parallel_shard_memref(void *shard_data, const memref_t &memref)
             std::cerr << "<marker: rseq abort from 0x" << std::hex
                       << memref.marker.marker_value << std::dec << " to handler>\n";
             break;
+        case TRACE_MARKER_TYPE_RSEQ_ENTRY:
+            std::cerr << "<marker: rseq entry with end at 0x" << std::hex
+                      << memref.marker.marker_value << std::dec << ">\n";
+            break;
         case TRACE_MARKER_TYPE_KERNEL_XFER:
             if (trace_version_ <= TRACE_ENTRY_VERSION_NO_KERNEL_PC) {
                 // Legacy traces just have the module offset.
@@ -338,6 +357,9 @@ view_t::parallel_shard_memref(void *shard_data, const memref_t &memref)
         case TRACE_MARKER_TYPE_CHUNK_FOOTER:
             std::cerr << "<marker: chunk footer #" << memref.marker.marker_value << ">\n";
             break;
+        case TRACE_MARKER_TYPE_FILTER_ENDPOINT:
+            std::cerr << "<marker: filter endpoint>\n";
+            break;
         case TRACE_MARKER_TYPE_PHYSICAL_ADDRESS:
             std::cerr << "<marker: physical address for following virtual: 0x" << std::hex
                       << memref.marker.marker_value << std::dec << ">\n";
@@ -351,7 +373,16 @@ view_t::parallel_shard_memref(void *shard_data, const memref_t &memref)
                       << memref.marker.marker_value << std::dec << ">\n";
             break;
         case TRACE_MARKER_TYPE_FUNC_ID:
-            std::cerr << "<marker: function #" << memref.marker.marker_value << ">\n";
+            if (memref.marker.marker_value >=
+                static_cast<intptr_t>(func_trace_t::TRACE_FUNC_ID_SYSCALL_BASE)) {
+                std::cerr << "<marker: function==syscall #"
+                          << (memref.marker.marker_value -
+                              static_cast<uintptr_t>(
+                                  func_trace_t::TRACE_FUNC_ID_SYSCALL_BASE))
+                          << ">\n";
+            } else {
+                std::cerr << "<marker: function #" << memref.marker.marker_value << ">\n";
+            }
             break;
         case TRACE_MARKER_TYPE_FUNC_RETADDR:
             std::cerr << "<marker: function return address 0x" << std::hex
@@ -365,13 +396,53 @@ view_t::parallel_shard_memref(void *shard_data, const memref_t &memref)
             std::cerr << "<marker: function return value 0x" << std::hex
                       << memref.marker.marker_value << std::dec << ">\n";
             break;
+        case TRACE_MARKER_TYPE_SYSCALL_FAILED:
+            std::cerr << "<marker: system call failed: " << memref.marker.marker_value
+                      << ">\n";
+            break;
         case TRACE_MARKER_TYPE_RECORD_ORDINAL:
             std::cerr << "<marker: record ordinal 0x" << std::hex
                       << memref.marker.marker_value << std::dec << ">\n";
             break;
+        case TRACE_MARKER_TYPE_SYSCALL:
+            std::cerr << "<marker: system call " << memref.marker.marker_value << ">\n";
+            break;
+        case TRACE_MARKER_TYPE_MAYBE_BLOCKING_SYSCALL:
+            std::cerr << "<marker: maybe-blocking system call>\n";
+            break;
+        case TRACE_MARKER_TYPE_DIRECT_THREAD_SWITCH:
+            std::cerr << "<marker: direct switch to thread " << memref.marker.marker_value
+                      << ">\n";
+            break;
         case TRACE_MARKER_TYPE_WINDOW_ID:
             // Handled above.
             break;
+        case TRACE_MARKER_TYPE_SYSCALL_TRACE_START:
+            std::cerr << "<marker: trace start for system call number "
+                      << memref.marker.marker_value << ">\n";
+            break;
+        case TRACE_MARKER_TYPE_SYSCALL_TRACE_END:
+            std::cerr << "<marker: trace end for system call number "
+                      << memref.marker.marker_value << ">\n";
+            break;
+        case TRACE_MARKER_TYPE_CONTEXT_SWITCH_START:
+            std::cerr << "<marker: trace start for context switch type "
+                      << memref.marker.marker_value << ">\n";
+            break;
+        case TRACE_MARKER_TYPE_CONTEXT_SWITCH_END:
+            std::cerr << "<marker: trace end for context switch type "
+                      << memref.marker.marker_value << ">\n";
+            break;
+        case TRACE_MARKER_TYPE_BRANCH_TARGET:
+            // These are not expected to be visible (since the reader adds them
+            // to memref.instr.indirect_branch_target) but we handle nonetheless.
+            std::cerr << "<marker: indirect branch target 0x" << std::hex
+                      << memref.marker.marker_value << std::dec << ">\n";
+            break;
+        case TRACE_MARKER_TYPE_CORE_WAIT:
+            std::cerr << "<marker: wait for another core>\n";
+            break;
+        case TRACE_MARKER_TYPE_CORE_IDLE: std::cerr << "<marker: core is idle>\n"; break;
         default:
             std::cerr << "<marker: type " << memref.marker.marker_type << "; value "
                       << memref.marker.marker_value << ">\n";
@@ -444,12 +515,16 @@ view_t::parallel_shard_memref(void *shard_data, const memref_t &memref)
         case TRACE_TYPE_INSTR_DIRECT_JUMP: std::cerr << "jump\n"; break;
         case TRACE_TYPE_INSTR_INDIRECT_JUMP: std::cerr << "indirect jump\n"; break;
         case TRACE_TYPE_INSTR_CONDITIONAL_JUMP: std::cerr << "conditional jump\n"; break;
+        case TRACE_TYPE_INSTR_TAKEN_JUMP: std::cerr << "taken conditional jump\n"; break;
+        case TRACE_TYPE_INSTR_UNTAKEN_JUMP:
+            std::cerr << "untaken conditional jump\n";
+            break;
         case TRACE_TYPE_INSTR_DIRECT_CALL: std::cerr << "call\n"; break;
         case TRACE_TYPE_INSTR_INDIRECT_CALL: std::cerr << "indirect call\n"; break;
         case TRACE_TYPE_INSTR_RETURN: std::cerr << "return\n"; break;
         case TRACE_TYPE_INSTR_NO_FETCH: std::cerr << "non-fetched instruction\n"; break;
         case TRACE_TYPE_INSTR_SYSENTER: std::cerr << "sysenter\n"; break;
-        default: error_string_ = "Uknown instruction type\n"; return false;
+        default: error_string_ = "Unknown instruction type\n"; return false;
         }
         ++num_disasm_instrs_;
         return true;
@@ -494,8 +569,21 @@ view_t::parallel_shard_memref(void *shard_data, const memref_t &memref)
         disasm = buf;
         disasm_cache_.insert({ orig_pc, disasm });
     }
-    // Put our prefix on raw byte spillover, and skip the other columns.
+    // Add branch decoration, which varies and so can't be cached purely by PC.
     auto newline = disasm.find('\n');
+    if (memref.instr.type == TRACE_TYPE_INSTR_TAKEN_JUMP)
+        disasm.insert(newline, " (taken)");
+    else if (memref.instr.type == TRACE_TYPE_INSTR_UNTAKEN_JUMP)
+        disasm.insert(newline, " (untaken)");
+    else if (trace_version_ >= TRACE_ENTRY_VERSION_BRANCH_INFO &&
+             type_is_instr_branch(memref.instr.type) &&
+             !type_is_instr_direct_branch(memref.instr.type)) {
+        std::stringstream str;
+        str << " (target 0x" << std::hex << memref.instr.indirect_branch_target << ")";
+        disasm.insert(newline, str.str());
+    }
+    // Put our prefix on raw byte spillover, and skip the other columns.
+    newline = disasm.find('\n');
     if (newline != std::string::npos && newline < disasm.size() - 1) {
         std::stringstream prefix;
         print_prefix(memstream, memref, -1, prefix);
@@ -515,3 +603,6 @@ view_t::print_results()
     std::cerr << std::setw(15) << num_disasm_instrs_ << " : total instructions\n";
     return true;
 }
+
+} // namespace drmemtrace
+} // namespace dynamorio

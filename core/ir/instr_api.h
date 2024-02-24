@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2010-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2010-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2002-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -131,14 +131,17 @@ typedef enum _dr_pred_type_t {
     DR_PRED_VS, /**< ARM condition: 0110 Overflow                (V == 1)           */
     DR_PRED_VC, /**< ARM condition: 0111 No overflow             (V == 0)           */
     DR_PRED_HI, /**< ARM condition: 1000 Unsigned higher         (C == 1 and Z == 0)*/
-    DR_PRED_LS, /**< ARM condition: 1001 Unsigned lower or same  (C == 0 or Z == 1) */
+    DR_PRED_LS, /**< ARM condition: 1001 Unsigned lower or same  (C == 1 or Z == 0) */
     DR_PRED_GE, /**< ARM condition: 1010 Signed >=               (N == V)           */
     DR_PRED_LT, /**< ARM condition: 1011 Signed less than        (N != V)           */
     DR_PRED_GT, /**< ARM condition: 1100 Signed greater than     (Z == 0 and N == V)*/
     DR_PRED_LE, /**< ARM condition: 1101 Signed <=               (Z == 1 or N != V) */
     DR_PRED_AL, /**< ARM condition: 1110 Always (unconditional)                    */
 #    ifdef AARCH64
-    DR_PRED_NV, /**< ARM condition: 1111 Never, meaning always                     */
+    DR_PRED_NV,     /**< ARM condition: 1111 Never, meaning always                     */
+    DR_PRED_MASKED, /** Used for AArch64 SVE instructions with governing predicate
+                     * registers
+                     */
 #    endif
 #    ifdef ARM
     DR_PRED_OP, /**< ARM condition: 1111 Part of opcode                            */
@@ -146,6 +149,36 @@ typedef enum _dr_pred_type_t {
     /* Aliases */
     DR_PRED_HS = DR_PRED_CS, /**< ARM condition: alias for DR_PRED_CS. */
     DR_PRED_LO = DR_PRED_CC, /**< ARM condition: alias for DR_PRED_CC. */
+#    ifdef AARCH64
+    /* Some SVE instructions use the NZCV condition flags in a different way to the base
+     * AArch64 instruction set, and SVE introduces aliases for the condition codes based
+     * on the SVE interpretation of the flags. The state of predicate registers can be
+     * used to alter control flow with condition flags being set or cleared by an explicit
+     * test of a predicate register or by instructions which generate a predicate result.
+     *
+     *  N   First   Set if the first active element was true.
+     *  Z   None    Cleared if any active element was true.
+     *  C   !Last   Cleared if the last active element was true.
+     *  V           Cleared by all flag setting SVE instructions except CTERMEQ and
+     *              CTERMNE, for scalarised loops.
+     */
+    DR_PRED_SVE_NONE = DR_PRED_EQ, /**<  0000 All active elements were false
+                                              or no active elements            (Z == 1) */
+    DR_PRED_SVE_ANY = DR_PRED_NE, /**<   0001 An active element was true       (Z == 0) */
+    DR_PRED_SVE_NLAST = DR_PRED_CS, /**< 0010 Last active element was false
+                                              or no active elements            (C == 1) */
+    DR_PRED_SVE_LAST = DR_PRED_CC, /**<  0011 Last active element was true     (C == 0) */
+    DR_PRED_SVE_FIRST = DR_PRED_MI, /**< 0100 First active element was true    (N == 1) */
+    DR_PRED_SVE_NFRST = DR_PRED_PL, /**< 0101 First active element was false
+                                              or no active elements            (N == 0) */
+    DR_PRED_SVE_PLAST = DR_PRED_LS, /**< 1001 Last active element was true,
+                                              all active elements were false,
+                                              or no active elements   (C == 1 or Z == 0)*/
+    DR_PRED_SVE_TCONT = DR_PRED_GE, /**< 1010 CTERM termination condition
+                                              not detected, continue loop      (N == V) */
+    DR_PRED_SVE_TSTOP = DR_PRED_LT, /**< 1011 CTERM termination condition
+                                              detected, terminate loop         (N != V) */
+#    endif
 #endif
 #ifdef RISCV64
     /* FIXME i#3544: RISC-V does not have compare flag register! */
@@ -249,6 +282,12 @@ struct _instr_t {
      * and called when the label is freed.
      */
     uint length;
+
+    /* The category of this instr (e.g. branch, load/store, etc.) as a combination
+     * of dr_instr_category_t bit values.
+     */
+    uint category;
+
     union {
         byte *bytes;
         instr_label_callback_t label_cb;
@@ -693,9 +732,39 @@ int
 instr_get_opcode(instr_t *instr);
 
 DR_API
+/**
+ * Returns \p instr's set of categories (set of DR_INSTR_CATEGORY_ constants).
+ * See #dr_instr_category_t.
+ * This API is only supported for decoded instructions, not for synthetic ones.
+ * Currently this is only supported for AArch64.
+ */
+uint
+instr_get_category(instr_t *instr);
+
+/**
+ * Get the relative offset of \p instr in an encoded instruction list.
+ *
+ * \note instrlist_encode* sets the offset field in each instr_t in the encoded
+ * instruction list. Therefore, this API must be called only after calling
+ * instrlist_encode*.
+ */
+DR_API
+size_t
+instr_get_offset(instr_t *instr);
+
+DR_API
 /** Assumes \p opcode is an OP_ constant and sets it to be instr's opcode. */
 void
 instr_set_opcode(instr_t *instr, int opcode);
+
+DR_API
+/**
+ * Assumes \p category is a set of DR_INSTR_CATEGORY_ constants
+ * and sets it to be instr's category.
+ * See #dr_instr_category_t.
+ */
+void
+instr_set_category(instr_t *instr, uint category);
 
 DR_API
 INSTR_INLINE
@@ -797,6 +866,18 @@ DR_API
  */
 void
 instr_set_target(instr_t *cti_instr, opnd_t target);
+
+DR_API
+/**
+ * If \p store_instr is not a store (instr_writes_memory() returns false), returns
+ * false.  If \p store_instr is a store (instr_writes_memory() returns true), returns
+ * whether its source operand with index \p source_ordinal (as passed to
+ * instr_get_src()) is a source for the value that is stored.  (If not, it may be an
+ * address register that is updated for pre-index or post-index writeback forms, or
+ * some other source that does not directly affect the value written to memory.)
+ */
+bool
+instr_is_opnd_store_source(instr_t *store_instr, int source_ordinal);
 
 INSTR_INLINE_INTERNALLY
 DR_API
@@ -1560,8 +1641,8 @@ DR_API
  * instruction's source operand, to be memory references.
  */
 bool
-instr_compute_address_ex(instr_t *instr, dr_mcontext_t *mc, uint index, OUT app_pc *addr,
-                         OUT bool *write);
+instr_compute_address_ex(instr_t *instr, dr_mcontext_t *mc, uint index,
+                         DR_PARAM_OUT app_pc *addr, DR_PARAM_OUT bool *write);
 
 DR_API
 /**
@@ -1577,7 +1658,8 @@ DR_API
  */
 bool
 instr_compute_address_ex_pos(instr_t *instr, dr_mcontext_t *mc, uint index,
-                             OUT app_pc *addr, OUT bool *is_write, OUT uint *pos);
+                             DR_PARAM_OUT app_pc *addr, DR_PARAM_OUT bool *is_write,
+                             DR_PARAM_OUT uint *pos);
 
 DR_API
 /**
@@ -1589,6 +1671,20 @@ DR_API
  */
 uint
 instr_memory_reference_size(instr_t *instr);
+
+DR_API
+/**
+ * Returns the number of memory read accesses of the instruction.
+ */
+uint
+instr_num_memory_read_access(instr_t *instr);
+
+DR_API
+/**
+ * Returns the number of memory write accesses of the instruction.
+ */
+uint
+instr_num_memory_write_access(instr_t *instr);
 
 DR_API
 /**
@@ -1814,10 +1910,28 @@ bool
 instr_is_rep_string_op(instr_t *instr);
 
 /**
- * Indicates which type of floating-point operation and instruction performs.
+ * Indicates which category the instruction corresponds to.
  */
 typedef enum {
-    DR_FP_STATE,   /**< Loads, stores, or queries general floating point state. */
+    DR_INSTR_CATEGORY_UNCATEGORIZED = 0x0, /**< Uncategorized. */
+    DR_INSTR_CATEGORY_FP = 0x1,            /**< Floating-Point operations. */
+    DR_INSTR_CATEGORY_LOAD = 0x2,          /**< Loads. */
+    DR_INSTR_CATEGORY_STORE = 0x4,         /**< Stores. */
+    DR_INSTR_CATEGORY_BRANCH = 0x8,        /**< Branches. */
+    DR_INSTR_CATEGORY_SIMD = 0x10,    /**< Operations with vector registers (SIMD). */
+    DR_INSTR_CATEGORY_STATE = 0x20,   /**< Saves, restores, or queries processor state. */
+    DR_INSTR_CATEGORY_MOVE = 0x40,    /**< Moves value from one location to another. */
+    DR_INSTR_CATEGORY_CONVERT = 0x80, /**< Converts to or from value. */
+    DR_INSTR_CATEGORY_MATH = 0x100, /**< Performs arithmetic or conditional operations. */
+    DR_INSTR_CATEGORY_OTHER = 0x200 /**< Other types of instructions. */
+} dr_instr_category_t;
+
+/**
+ * Indicates which type of floating-point operation and instruction performs.
+ * \deprecated Replaced by the more general #dr_instr_category_t.
+ */
+typedef enum {
+    DR_FP_STATE,   /**< Saves, restores, or queries processor state. */
     DR_FP_MOVE,    /**< Moves floating point values from one location to another. */
     DR_FP_CONVERT, /**< Converts to or from floating point values. */
     DR_FP_MATH,    /**< Performs arithmetic or conditional operations. */
@@ -1829,6 +1943,18 @@ DR_API
  * @param[in] instr  The instruction to query
  * @param[out] type  If the return value is true and \p type is
  *   non-NULL, the type of the floating point operation is written to \p type.
+ */
+bool
+instr_is_floating_type(instr_t *instr, dr_instr_category_t *type);
+
+DR_API
+/**
+ * Returns true iff \p instr is a floating point instruction.
+ * @param[in] instr  The instruction to query
+ * @param[out] type  If the return value is true and \p type is
+ *   non-NULL, the type of the floating point operation is written to \p type.
+ * \deprecated Prefer instr_is_floating_type() which uses the more general
+ * #dr_instr_category_t.
  */
 bool
 instr_is_floating_ex(instr_t *instr, dr_fp_type_t *type);
@@ -2402,8 +2528,9 @@ DR_API
  * the stolen register base, or the thread-private context area.
  */
 bool
-instr_is_reg_spill_or_restore(void *drcontext, instr_t *instr, bool *tls OUT,
-                              bool *spill OUT, reg_id_t *reg OUT, uint *offs OUT);
+instr_is_reg_spill_or_restore(void *drcontext, instr_t *instr, bool *tls DR_PARAM_OUT,
+                              bool *spill DR_PARAM_OUT, reg_id_t *reg DR_PARAM_OUT,
+                              uint *offs DR_PARAM_OUT);
 
 /****************************************************************************
  * EFLAGS/CONDITION CODES
@@ -2415,17 +2542,18 @@ instr_is_reg_spill_or_restore(void *drcontext, instr_t *instr, bool *tls OUT,
 /* we only care about these 11 flags, and mostly only about the first 6
  * we consider an undefined effect on a flag to be a write
  */
-#    define EFLAGS_READ_CF 0x00000001  /**< Reads CF (Carry Flag). */
-#    define EFLAGS_READ_PF 0x00000002  /**< Reads PF (Parity Flag). */
-#    define EFLAGS_READ_AF 0x00000004  /**< Reads AF (Auxiliary Carry Flag). */
-#    define EFLAGS_READ_ZF 0x00000008  /**< Reads ZF (Zero Flag). */
-#    define EFLAGS_READ_SF 0x00000010  /**< Reads SF (Sign Flag). */
-#    define EFLAGS_READ_TF 0x00000020  /**< Reads TF (Trap Flag). */
-#    define EFLAGS_READ_IF 0x00000040  /**< Reads IF (Interrupt Enable Flag). */
-#    define EFLAGS_READ_DF 0x00000080  /**< Reads DF (Direction Flag). */
-#    define EFLAGS_READ_OF 0x00000100  /**< Reads OF (Overflow Flag). */
-#    define EFLAGS_READ_NT 0x00000200  /**< Reads NT (Nested Task). */
-#    define EFLAGS_READ_RF 0x00000400  /**< Reads RF (Resume Flag). */
+#    define EFLAGS_READ_CF 0x00000001 /**< Reads CF (Carry Flag). */
+#    define EFLAGS_READ_PF 0x00000002 /**< Reads PF (Parity Flag). */
+#    define EFLAGS_READ_AF 0x00000004 /**< Reads AF (Auxiliary Carry Flag). */
+#    define EFLAGS_READ_ZF 0x00000008 /**< Reads ZF (Zero Flag). */
+#    define EFLAGS_READ_SF 0x00000010 /**< Reads SF (Sign Flag). */
+#    define EFLAGS_READ_TF 0x00000020 /**< Reads TF (Trap Flag). */
+#    define EFLAGS_READ_IF 0x00000040 /**< Reads IF (Interrupt Enable Flag). */
+#    define EFLAGS_READ_DF 0x00000080 /**< Reads DF (Direction Flag). */
+#    define EFLAGS_READ_OF 0x00000100 /**< Reads OF (Overflow Flag). */
+#    define EFLAGS_READ_NT 0x00000200 /**< Reads NT (Nested Task). */
+#    define EFLAGS_READ_RF 0x00000400 /**< Reads RF (Resume Flag). */
+
 #    define EFLAGS_WRITE_CF 0x00000800 /**< Writes CF (Carry Flag). */
 #    define EFLAGS_WRITE_PF 0x00001000 /**< Writes PF (Parity Flag). */
 #    define EFLAGS_WRITE_AF 0x00002000 /**< Writes AF (Auxiliary Carry Flag). */
@@ -2438,9 +2566,18 @@ instr_is_reg_spill_or_restore(void *drcontext, instr_t *instr, bool *tls OUT,
 #    define EFLAGS_WRITE_NT 0x00100000 /**< Writes NT (Nested Task). */
 #    define EFLAGS_WRITE_RF 0x00200000 /**< Writes RF (Resume Flag). */
 
-#    define EFLAGS_READ_ALL 0x000007ff           /**< Reads all flags. */
+/* TODO i#6485: Re-number the following when a major binary compatibility break
+ * is more convenient.
+ */
+/* OP_clac and OP_stac both write the AC flag. Even though we do not have an
+ * opcode that reads it, we still add EFLAGS_READ_AC for parity.
+ */
+#    define EFLAGS_READ_AC 0x00400000  /**< Reads AC (Alignment Check Flag). */
+#    define EFLAGS_WRITE_AC 0x00800000 /**< Writes AC (Alignment Check Flag). */
+
+#    define EFLAGS_READ_ALL 0x004007ff           /**< Reads all flags. */
 #    define EFLAGS_READ_NON_PRED EFLAGS_READ_ALL /**< Flags not read by predicates. */
-#    define EFLAGS_WRITE_ALL 0x003ff800          /**< Writes all flags. */
+#    define EFLAGS_WRITE_ALL 0x00bff800          /**< Writes all flags. */
 /* 6 most common flags ("arithmetic flags"): CF, PF, AF, ZF, SF, OF */
 /** Reads all 6 arithmetic flags (CF, PF, AF, ZF, SF, OF). */
 #    define EFLAGS_READ_6 0x0000011f
@@ -2453,9 +2590,13 @@ instr_is_reg_spill_or_restore(void *drcontext, instr_t *instr, bool *tls OUT,
 #    define EFLAGS_WRITE_ARITH EFLAGS_WRITE_6
 
 /** Converts an EFLAGS_WRITE_* value to the corresponding EFLAGS_READ_* value. */
-#    define EFLAGS_WRITE_TO_READ(x) ((x) >> 11)
+#    define EFLAGS_WRITE_TO_READ(x)                                  \
+        ((((x) & ((EFLAGS_WRITE_ALL) & ~(EFLAGS_WRITE_AC))) >> 11) | \
+         (((x) & (EFLAGS_WRITE_AC)) >> 1))
 /** Converts an EFLAGS_READ_* value to the corresponding EFLAGS_WRITE_* value. */
-#    define EFLAGS_READ_TO_WRITE(x) ((x) << 11)
+#    define EFLAGS_READ_TO_WRITE(x)                                \
+        ((((x) & ((EFLAGS_READ_ALL) & ~(EFLAGS_READ_AC))) << 11) | \
+         (((x) & (EFLAGS_READ_AC)) << 1))
 
 /**
  * The actual bits in the eflags register that we care about:\n<pre>

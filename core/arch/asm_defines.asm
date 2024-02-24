@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2008-2009 VMware, Inc.  All rights reserved.
  * ********************************************************** */
 
@@ -35,8 +35,8 @@
 #define _ASM_DEFINES_ASM_ 1
 
 /* Preprocessor macro definitions shared among all .asm files.
- * Since cpp macros can't generate newlines we have a later
- * script replace @N@ for us.
+ * Since cpp macros can't generate newlines and #s we have a later
+ * script replace @N@ and @P@ respectively for us, see: make/CMake_asm.cmake.
  */
 
 #include "configure.h"
@@ -106,20 +106,26 @@
 
 # if defined(MACOS) && defined(AARCH64)
 
-#  define DECLARE_FUNC(symbol) \
+/* The Mac assembler isn't resolving macro args so we have to force it to
+ * support FUNCNAME used in many files.
+ */
+#  define DECLARE_FUNC(symbol) DECLARE_FUNC_EVAL(symbol)
+#  define DECLARE_FUNC_EVAL(symbol) \
 .p2align 2 @N@ \
 .globl _##symbol @N@ \
-.private_extern _##symbol @N@ \
+.private_extern _##symbol @N@
 
-#  define DECLARE_EXPORTED_FUNC(symbol) \
+#  define DECLARE_EXPORTED_FUNC(symbol) DECLARE_EXPORTED_FUNC_EVAL(symbol)
+#  define DECLARE_EXPORTED_FUNC_EVAL(symbol) \
 .p2align 2 @N@ \
-.globl _##symbol @N@ \
+.globl _##symbol @N@
 
 #  define DECLARE_GLOBAL(symbol) \
 .globl _##symbol @N@\
 .private_extern _##symbol
 
-#  define GLOBAL_LABEL(label) _##label
+#  define GLOBAL_LABEL(label) GLOBAL_LABEL_EVAL(label)
+#  define GLOBAL_LABEL_EVAL(label) _##label
 #  define GLOBAL_REF(label) _##label
 
 #  define AARCH64_ADRP_GOT(sym, reg) \
@@ -128,9 +134,7 @@ add reg, reg, sym@PAGEOFF
 
 #  define AARCH64_ADRP_GOT_LDR(sym, reg) \
 adrp reg, sym@PAGE @N@ \
-add  reg, reg, sym@PAGEOFF
-
-#  define SYSNUM_REG w16
+ldr  reg, [reg, sym@PAGEOFF]
 
 # else
 
@@ -159,8 +163,6 @@ add reg, reg, @P@:lo12:sym
 #  define AARCH64_ADRP_GOT_LDR(sym, reg) \
 adrp reg, :got:sym @N@ \
 ldr  reg, [reg, @P@:got_lo12:sym]
-
-#  define SYSNUM_REG w8
 
 # endif
 
@@ -377,6 +379,11 @@ ASSUME fs:_DATA @N@\
 # define REG_R11 x11
 # define REG_R12 x12
 /* skip [x13..x30], not available on AArch32 */
+#  if defined(MACOS)
+#   define SYSNUM_REG w16
+#  else
+#   define SYSNUM_REG w8
+#  endif /* MACOS */
 #elif defined(RISCV64)
 # define REG_SP   sp
 # define REG_R0   x0
@@ -541,11 +548,11 @@ ASSUME fs:_DATA @N@\
  * x4(tp)           : Thread pointer
  * x5(t0)           : Temporary/alternate link register
  * x6..7(t1..2)     : Temporaries
- * x8(s0/fp)        : Calee saved register/frame pointer
- * x9(s1)           : Calee saved register
+ * x8(s0/fp)        : Callee saved register/frame pointer
+ * x9(s1)           : Callee saved register
  * x10..11(a0..1)   : Function arguments/return values
  * x12..17(a2..7)   : Function arguments
- * x18..27(s2..11)  : Calee saved registers
+ * x18..27(s2..11)  : Callee saved registers
  * x28..31(t3..6)   : Temporaries
  *
  * f0..7(ft0..7)    : FP temporaries
@@ -563,6 +570,7 @@ ASSUME fs:_DATA @N@\
 # define ARG6 REG_R15
 # define ARG7 REG_R16
 # define ARG8 REG_R17
+# define SYSNUM_REG REG_R17
 /* Arguments are passed on stack right-to-left. */
 # define ARG9  0(REG_SP) /* no ret addr */
 # define ARG10 ARG_SZ(REG_SP)
@@ -908,27 +916,102 @@ ASSUME fs:_DATA @N@\
         mov      ARG1, p1   @N@\
         blx      callee
 #elif defined(RISCV64)
+/* For RISC-V, there is no instruction which can operate on both immediates
+ * and registers. Here is a macro that judges whether its argument is a
+ * register or not.
+ */
+.set reg.x0,    1
+.set reg.zero,  1
+.set reg.x1,    1
+.set reg.ra,    1
+.set reg.x2,    1
+.set reg.sp,    1
+.set reg.x3,    1
+.set reg.gp,    1
+.set reg.x4,    1
+.set reg.tp,    1
+.set reg.x5,    1
+.set reg.t0,    1
+.set reg.x6,    1
+.set reg.t1,    1
+.set reg.x7,    1
+.set reg.t2,    1
+.set reg.x8,    1
+.set reg.s0,    1
+.set reg.fp,    1
+.set reg.x9,    1
+.set reg.s1,    1
+.set reg.x10,   1
+.set reg.a0,    1
+.set reg.x11,   1
+.set reg.a1,    1
+.set reg.x12,   1
+.set reg.a2,    1
+.set reg.x13,   1
+.set reg.a3,    1
+.set reg.x14,   1
+.set reg.a4,    1
+.set reg.x15,   1
+.set reg.a5,    1
+.set reg.x16,   1
+.set reg.a6,    1
+.set reg.x17,   1
+.set reg.a7,    1
+.set reg.x18,   1
+.set reg.s2,    1
+.set reg.x19,   1
+.set reg.s3,    1
+.set reg.x20,   1
+.set reg.s4,    1
+.set reg.x21,   1
+.set reg.s5,    1
+.set reg.x22,   1
+.set reg.s6,    1
+.set reg.x23,   1
+.set reg.s7,    1
+.set reg.x24,   1
+.set reg.s8,    1
+.set reg.x25,   1
+.set reg.s9,    1
+.set reg.x26,   1
+.set reg.s10,   1
+.set reg.x27,   1
+.set reg.s11,   1
+.set reg.x28,   1
+.set reg.t3,    1
+.set reg.x29,   1
+.set reg.t4,    1
+.set reg.x30,   1
+.set reg.t5,    1
+.set reg.x31,   1
+.set reg.t6,    1
+.macro MOV reg, p
+  .ifdef "reg.\p"
+        mv      \reg, \p
+  .else
+        li      \reg, \p
+  .endif
+.endm
 # define CALLC0(callee)    \
-        call      callee
-/* FIXME i#3544: Handle p1..4 being registers instead of immediates. */
+        call     callee
 # define CALLC1(callee, p1)    \
-        li      ARG1, p1   @N@\
-        call      callee
+        MOV      ARG1, p1   @N@\
+        call     callee
 # define CALLC2(callee, p1, p2)    \
-        li      ARG2, p2   @N@\
-        li      ARG1, p1   @N@\
-        call      callee
+        MOV      ARG2, p2   @N@\
+        MOV      ARG1, p1   @N@\
+        call     callee
 # define CALLC3(callee, p1, p2, p3)    \
-        li      ARG3, p3   @N@\
-        li      ARG2, p2   @N@\
-        li      ARG1, p1   @N@\
-        call      callee
+        MOV      ARG3, p3  @N@ \
+        MOV      ARG2, p2  @N@ \
+        MOV      ARG1, p1  @N@ \
+        call     callee
 # define CALLC4(callee, p1, p2, p3, p4)    \
-        li      ARG4, p4   @N@\
-        li      ARG3, p3   @N@\
-        li      ARG2, p2   @N@\
-        li      ARG1, p1   @N@\
-        call      callee
+        MOV      ARG4, p4   @N@\
+        MOV      ARG3, p3   @N@\
+        MOV      ARG2, p2   @N@\
+        MOV      ARG1, p1   @N@\
+        call     callee
 #endif
 
 /* For stdcall callees */

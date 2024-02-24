@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2001-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -2747,11 +2747,20 @@ client_process_bb(dcontext_t *dcontext, build_bb_t *bb)
         return true;
     }
 
+    /* DrMem#1735: pass app pc, not selfmod copy pc */
+    app_pc tag = bb->pretend_pc == NULL ? bb->start_pc : bb->pretend_pc;
+
+#ifdef LINUX
+    if (TEST(FRAG_STARTS_RSEQ_REGION, bb->flags)) {
+        rseq_insert_start_label(dcontext, tag, bb->ilist);
+        /* This is a temporary flag, as it overlaps with another used later. */
+        bb->flags &= ~FRAG_STARTS_RSEQ_REGION;
+    }
+#endif
+
     /* Call the bb creation callback(s) */
-    if (!instrument_basic_block(dcontext,
-                                /* DrMem#1735: pass app pc, not selfmod copy pc */
-                                (bb->pretend_pc == NULL ? bb->start_pc : bb->pretend_pc),
-                                bb->ilist, bb->for_trace, !bb->app_interp, &emitflags)) {
+    if (!instrument_basic_block(dcontext, tag, bb->ilist, bb->for_trace, !bb->app_interp,
+                                &emitflags)) {
         /* although no callback was called we must process syscalls/ints (PR 307284) */
     }
     if (bb->for_cache && TEST(DR_EMIT_GO_NATIVE, emitflags)) {
@@ -3142,10 +3151,11 @@ mangle_pre_client(dcontext_t *dcontext, build_bb_t *bb)
                IF_X86(instr_get_opcode(mov) == OP_mov_imm &&)
                    IF_ARM(instr_get_opcode(mov) == OP_mov &&
                           OPND_IS_IMMED_INT(instr_get_src(mov, 0)) &&)
-                       IF_AARCH64(instr_get_opcode(mov) == OP_movz &&)(
-                           bb->start_pc == instr_get_raw_bits(mov) ||
-                           /* the translation field might be NULL */
-                           bb->start_pc == instr_get_translation(mov)));
+                       IF_AARCH64(instr_get_opcode(mov) == OP_movz &&)
+                           IF_RISCV64(instr_get_opcode(mov) == OP_addi &&)(
+                               bb->start_pc == instr_get_raw_bits(mov) ||
+                               /* the translation field might be NULL */
+                               bb->start_pc == instr_get_translation(mov)));
         /* i#1998: ensure the instr is Level 3+ */
         instr_decode(dcontext, mov);
         instr_set_src(mov, 0, OPND_CREATE_INT32(1));
@@ -4766,8 +4776,8 @@ build_native_exec_bb(dcontext_t *dcontext, build_bb_t *bb)
                                                           SCRATCH_REG0_OFFS));
     insert_shared_restore_dcontext_reg(dcontext, bb->ilist, NULL);
 
-#ifdef AARCH64
-    ASSERT_NOT_IMPLEMENTED(false); /* FIXME i#1569 */
+#if defined(AARCH64) || defined(RISCV64)
+    ASSERT_NOT_IMPLEMENTED(false); /* FIXME i#1569 i#3544 */
 #else
     /* this is the jump to native code */
     instrlist_append(bb->ilist,
@@ -5211,9 +5221,9 @@ build_basic_block_fragment_done:
  */
 instrlist_t *
 recreate_bb_ilist(dcontext_t *dcontext, byte *pc, byte *pretend_pc, app_pc stop_pc,
-                  uint flags, uint *res_flags OUT, uint *res_exit_type OUT,
-                  bool check_vm_area, bool mangle, void **vmlist_out OUT,
-                  bool call_client, bool for_trace)
+                  uint flags, uint *res_flags DR_PARAM_OUT,
+                  uint *res_exit_type DR_PARAM_OUT, bool check_vm_area, bool mangle,
+                  void **vmlist_out DR_PARAM_OUT, bool call_client, bool for_trace)
 {
     build_bb_t bb;
 
@@ -5457,6 +5467,7 @@ recreate_fragment_ilist(dcontext_t *dcontext, byte *pc,
 
         /* XXX i#5062 In the future this call should be placed inside mangle_trace() */
         IF_AARCH64(fixup_indirect_trace_exit(dcontext, ilist));
+        IF_RISCV64(ASSERT_NOT_IMPLEMENTED(false));
 
         /* PR 214962: re-apply client changes, this time storing translation
          * info for modified instrs
@@ -6186,6 +6197,7 @@ mangle_indirect_branch_in_trace(dcontext_t *dcontext, instrlist_t *trace,
         }
     }
 #    endif
+/* end of X86 */
 #elif defined(AARCH64)
     instr_t *instr;
     reg_id_t jump_target_reg;
@@ -6267,11 +6279,11 @@ mangle_indirect_branch_in_trace(dcontext_t *dcontext, instrlist_t *trace,
     instrlist_remove(trace, targeter);
     instr_destroy(dcontext, targeter);
     added_size -= AARCH64_INSTR_SIZE;
-
-#elif defined(ARM)
-    /* FIXME i#1551: NYI on ARM */
+/* end of AARCH64 */
+#else
+    /* FIXME i#1551 i#3544: NYI on ARM/RISCV64 */
     ASSERT_NOT_IMPLEMENTED(false);
-#endif /* X86/ARM */
+#endif /* X86/ARM/RISCV64 */
     return added_size;
 }
 
@@ -6429,6 +6441,8 @@ fixup_last_cti(dcontext_t *dcontext, instrlist_t *trace, app_pc next_tag, uint n
             /* remove unnecessary ubr at end of block */
 #ifdef AARCH64
             delete_after = fixup_cbr_on_stolen_reg(dcontext, trace, targeter);
+#elif defined(RISCV64)
+            ASSERT_NOT_IMPLEMENTED(false);
 #else
             delete_after = instr_get_prev(targeter);
 #endif

@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2011-2021 Google, Inc.  All rights reserved.
+ * Copyright (c) 2011-2024 Google, Inc.  All rights reserved.
  * Copyright (c) 2001-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -179,21 +179,22 @@ int sve_veclen;
 int sve_veclens[] = { 128,  256,  384,  512,  640,  768,  896,  1024,
                       1152, 1280, 1408, 1536, 1664, 1792, 1920, 2048 };
 
-void
-dr_set_sve_vl(int vl)
+bool
+dr_set_sve_vector_length(int vl)
 {
-    /* TODO i#3044: Vector length will be read from h/w when running on SVE. */
-    for (int i = 0; i < sizeof(sve_veclens); i++) {
+    for (int i = 0; i < sizeof(sve_veclens) / sizeof(sve_veclens[0]); i++) {
         if (vl == sve_veclens[i]) {
             sve_veclen = vl;
-            return;
+            return true;
         }
     }
-    CLIENT_ASSERT(false, "invalid SVE vector length");
+    /* Make unusual values visible in case our internal uses mess up. */
+    ASSERT_CURIOSITY(false);
+    return false;
 }
 
 int
-dr_get_sve_vl(void)
+dr_get_sve_vector_length(void)
 {
     return sve_veclen;
 }
@@ -202,8 +203,20 @@ dr_get_sve_vl(void)
  * type is OP_INVALID so can be copied to instr->opcode
  */
 #define xx 0 /* TYPE_NONE */, OPSZ_NA
-const instr_info_t invalid_instr = { OP_INVALID, 0x000000, "(bad)", xx, xx, xx,
-                                     xx,         xx,       0,       0,  0 };
+const instr_info_t invalid_instr = { OP_INVALID,
+                                     0x000000,
+#ifdef X86
+                                     DR_INSTR_CATEGORY_UNCATEGORIZED,
+#endif
+                                     "(bad)",
+                                     xx,
+                                     xx,
+                                     xx,
+                                     xx,
+                                     xx,
+                                     0,
+                                     0,
+                                     0 };
 #undef xx
 
 /* PR 302344: used for shared traces -tracedump_origins where we
@@ -220,7 +233,8 @@ static dr_isa_mode_t initexit_isa_mode = DEFAULT_ISA_MODE_STATIC;
  * mis-interpreting application code.
  */
 bool
-dr_set_isa_mode(void *drcontext, dr_isa_mode_t new_mode, dr_isa_mode_t *old_mode_out OUT)
+dr_set_isa_mode(void *drcontext, dr_isa_mode_t new_mode,
+                dr_isa_mode_t *old_mode_out DR_PARAM_OUT)
 {
     dcontext_t *dcontext = (dcontext_t *)drcontext;
     dr_isa_mode_t old_mode;

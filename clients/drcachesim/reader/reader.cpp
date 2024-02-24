@@ -30,12 +30,24 @@
  * DAMAGE.
  */
 
+#include "reader.h"
+
 #include <assert.h>
 #include <inttypes.h>
+#include <stdint.h>
 #include <string.h>
-#include "reader.h"
-#include "../common/memref.h"
-#include "../common/utils.h"
+
+#include <queue>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+
+#include "memref.h"
+#include "utils.h"
+#include "trace_entry.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 // Work around clang-format bug: no newline after return type for single-char operator.
 // clang-format off
@@ -76,7 +88,13 @@ reader_t::operator++()
             // We've already presented the thread exit entry to the analyzer.
             continue;
         }
-        VPRINT(this, 4, "RECV: type=%s (%d), size=%d, addr=0x%zx\n",
+        if (input_entry_->type == TRACE_TYPE_HEADER) {
+            // We support complete traces being packaged in archives and then read
+            // sequentially.  We just keep going past the header.
+            VPRINT(this, 2, "Assuming header is part of concatenated traces\n");
+            continue;
+        }
+        VPRINT(this, 5, "RECV: type=%s (%d), size=%d, addr=0x%zx\n",
                trace_type_names[input_entry_->type], input_entry_->type,
                input_entry_->size, input_entry_->addr);
         if (process_input_entry())
@@ -152,6 +170,8 @@ reader_t::process_input_entry()
     case TRACE_TYPE_INSTR_DIRECT_JUMP:
     case TRACE_TYPE_INSTR_INDIRECT_JUMP:
     case TRACE_TYPE_INSTR_CONDITIONAL_JUMP:
+    case TRACE_TYPE_INSTR_TAKEN_JUMP:
+    case TRACE_TYPE_INSTR_UNTAKEN_JUMP:
     case TRACE_TYPE_INSTR_DIRECT_CALL:
     case TRACE_TYPE_INSTR_INDIRECT_CALL:
     case TRACE_TYPE_INSTR_RETURN:
@@ -169,6 +189,12 @@ reader_t::process_input_entry()
             cur_ref_.instr.tid = cur_tid_;
             cur_ref_.instr.type = (trace_type_t)input_entry_->type;
             cur_ref_.instr.size = input_entry_->size;
+            if (type_is_instr_branch(cur_ref_.instr.type) &&
+                !type_is_instr_direct_branch(cur_ref_.instr.type)) {
+                cur_ref_.instr.indirect_branch_target = last_branch_target_;
+            } else {
+                cur_ref_.instr.indirect_branch_target = 0;
+            }
             cur_pc_ = input_entry_->addr;
             cur_ref_.instr.addr = cur_pc_;
             next_pc_ = cur_pc_ + cur_ref_.instr.size;
@@ -281,6 +307,9 @@ reader_t::process_input_entry()
             skip_chunk_header_.erase(cur_tid_);
         } else if (cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_RECORD_ORDINAL) {
             // Not exposed to tools.
+        } else if (cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_BRANCH_TARGET) {
+            // Not exposed to tools.
+            last_branch_target_ = cur_ref_.marker.marker_value;
         } else {
             have_memref = true;
         }
@@ -289,14 +318,18 @@ reader_t::process_input_entry()
             // already seen, so this condition is not really needed. But to
             // be future-proof, we want to avoid looking at timestamps that
             // won't be passed to the user as well.
-            if (have_memref)
+            if (have_memref) {
                 last_timestamp_ = cur_ref_.marker.marker_value;
+                if (first_timestamp_ == 0)
+                    first_timestamp_ = last_timestamp_;
+            }
         } else if (cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_VERSION)
             version_ = cur_ref_.marker.marker_value;
         else if (cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_FILETYPE) {
             filetype_ = cur_ref_.marker.marker_value;
-            if (TESTANY(OFFLINE_FILE_TYPE_ENCODINGS, filetype_))
+            if (TESTANY(OFFLINE_FILE_TYPE_ENCODINGS, filetype_)) {
                 expect_no_encodings_ = false;
+            }
         } else if (cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_CACHE_LINE_SIZE)
             cache_line_size_ = cur_ref_.marker.marker_value;
         else if (cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_PAGE_SIZE)
@@ -305,6 +338,13 @@ reader_t::process_input_entry()
             chunk_instr_count_ = cur_ref_.marker.marker_value;
         else if (cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_CHUNK_FOOTER)
             skip_chunk_header_.insert(cur_tid_);
+        else if (cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_SYSCALL_TRACE_START ||
+                 cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_CONTEXT_SWITCH_START) {
+            in_kernel_trace_ = true;
+        } else if (cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_SYSCALL_TRACE_END ||
+                   cur_ref_.marker.marker_type == TRACE_MARKER_TYPE_CONTEXT_SWITCH_END) {
+            in_kernel_trace_ = false;
+        }
         break;
     default:
         ERRMSG("Unknown trace entry type %s (%d)\n", trace_type_names[input_entry_->type],
@@ -360,8 +400,6 @@ reader_t::pre_skip_instructions()
 reader_t &
 reader_t::skip_instructions(uint64_t instruction_count)
 {
-    if (instruction_count == 0)
-        return *this;
     // We do not support skipping with instr bundles.
     if (bundle_idx_ != 0) {
         ERRMSG("Skipping with instr bundles is not supported.\n");
@@ -383,6 +421,12 @@ reader_t::skip_instructions_with_timestamp(uint64_t stop_instruction_count)
     // process it so we do not use the ++ operator function.
     uint64_t stop_count = stop_instruction_count + 1;
     trace_entry_t timestamp = {};
+    // Use the most recent timestamp.
+    if (last_timestamp_ != 0) {
+        timestamp.type = TRACE_TYPE_MARKER;
+        timestamp.size = TRACE_MARKER_TYPE_TIMESTAMP;
+        timestamp.addr = static_cast<addr_t>(last_timestamp_);
+    }
     trace_entry_t cpu = {};
     trace_entry_t next_instr = {};
     bool prev_was_record_ord = false;
@@ -395,8 +439,9 @@ reader_t::skip_instructions_with_timestamp(uint64_t stop_instruction_count)
         if (input_entry_ != nullptr) // Only at start: and we checked for skipping 0.
             entry_copy_ = *input_entry_;
         trace_entry_t *next = read_next_entry();
-        if (next == nullptr) {
-            VPRINT(this, 1, "Failed to read next entry\n");
+        if (next == nullptr || next->type == TRACE_TYPE_FOOTER) {
+            VPRINT(this, 1,
+                   next == nullptr ? "Failed to read next entry\n" : "Hit EOF\n");
             at_eof_ = true;
             return *this;
         }
@@ -471,3 +516,6 @@ reader_t::skip_instructions_with_timestamp(uint64_t stop_instruction_count)
     }
     return *this;
 }
+
+} // namespace drmemtrace
+} // namespace dynamorio

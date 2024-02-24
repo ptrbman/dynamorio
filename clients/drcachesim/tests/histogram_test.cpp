@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2021-2022 Google, LLC  All rights reserved.
+ * Copyright (c) 2021-2023 Google, LLC  All rights reserved.
  * **********************************************************/
 
 /*
@@ -43,7 +43,8 @@
 #include "../common/memref.h"
 #include "memref_gen.h"
 
-namespace {
+namespace dynamorio {
+namespace drmemtrace {
 
 bool
 check_cross_line()
@@ -78,10 +79,8 @@ check_cross_line()
     return true;
 }
 
-} // namespace
-
 int
-main(int argc, const char *argv[])
+test_main(int argc, const char *argv[])
 {
     if (check_cross_line()) {
         std::cerr << "histogram_test passed\n";
@@ -90,3 +89,6 @@ main(int argc, const char *argv[])
     std::cerr << "histogram_test FAILED\n";
     exit(1);
 }
+
+} // namespace drmemtrace
+} // namespace dynamorio

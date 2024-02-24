@@ -32,6 +32,14 @@
 
 #include "../globals.h"
 #include "proc.h"
+#ifdef UNIX
+#    include "../../unix/include/syscall.h"
+#else
+#    error NYI
+#endif
+
+/* From Linux kernel, it's the only option available. */
+#define SYS_RISCV_FLUSH_ICACHE_LOCAL 1
 
 static int num_simd_saved;
 static int num_simd_registers;
@@ -40,7 +48,7 @@ static int num_opmask_registers;
 static size_t
 read_cache_line(const char *fname)
 {
-    char b[sizeof(uint64)], tmp;
+    char b[sizeof(uint64)] = { 0 }, tmp;
     size_t res = 0;
     ssize_t n, i;
     file_t f;
@@ -72,7 +80,8 @@ read_cache_line(const char *fname)
  * - This code assumes that all harts have the same L1 cache-line size.
  */
 static bool
-get_cache_line_size(OUT size_t *dcache_line_size, OUT size_t *icache_line_size)
+get_cache_line_size(DR_PARAM_OUT size_t *dcache_line_size,
+                    DR_PARAM_OUT size_t *icache_line_size)
 {
 #if !defined(DR_HOST_NOT_TARGET) && defined(LINUX)
     static const char *d_cache_fname =
@@ -140,8 +149,11 @@ proc_has_feature(feature_bit_t f)
 void
 machine_cache_sync(void *pc_start, void *pc_end, bool flush_icache)
 {
-    /* FIXME i#3544: Not implemented. FENCE.I ? Maybe a syscall to clean icache? */
-    ASSERT_NOT_IMPLEMENTED(false);
+    /* We need to flush the icache on all harts, which is not feasible for FENCE.I, so we
+     * use SYS_riscv_flush_icache to let the kernel do this.
+     */
+    dynamorio_syscall(SYS_riscv_flush_icache, 3, pc_start, pc_end,
+                      SYS_RISCV_FLUSH_ICACHE_LOCAL);
 }
 
 DR_API
@@ -224,8 +236,9 @@ DR_API
 size_t
 proc_save_fpstate(byte *buf)
 {
-    /* FIXME i#3544: Not implemented */
-    ASSERT_NOT_IMPLEMENTED(false);
+    /* All registers are saved by insert_push_all_registers so nothing extra
+     * needs to be saved here.
+     */
     return DR_FPSTATE_BUF_SIZE;
 }
 
@@ -233,8 +246,7 @@ DR_API
 void
 proc_restore_fpstate(byte *buf)
 {
-    /* FIXME i#3544: Not implemented */
-    ASSERT_NOT_IMPLEMENTED(false);
+    /* Nothing to restore. */
 }
 
 void

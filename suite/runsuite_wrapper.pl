@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 # **********************************************************
-# Copyright () 2016-2023 Google, Inc.  All rights reserved.
+# Copyright () 2016-2024 Google, Inc.  All rights reserved.
 # **********************************************************
 
 # Redistribution and use in source and binary forms, with or without
@@ -49,6 +49,8 @@ use File::Basename;
 my $mydir = dirname(abs_path($0));
 my $is_CI = 0;
 my $is_aarchxx = $Config{archname} =~ /(aarch64)|(arm)/;
+my $is_x86_64 = $Config{archname} =~ /x86_64/;
+my $is_riscv64 = $Config{archname} =~ /riscv64/;
 my $is_long = $ENV{'CI_TRIGGER'} eq 'push' && $ENV{'CI_BRANCH'} eq 'refs/heads/master';
 
 # Forward args to runsuite.cmake:
@@ -130,9 +132,9 @@ if ($child) {
         $args .= ";copy_docs";
     }
     # Include Dr. Memory.
-    if (($is_aarchxx || $ENV{'DYNAMORIO_CROSS_AARCHXX_LINUX_ONLY'} eq 'yes') &&
+    if (($is_riscv64 || $is_aarchxx || $ENV{'DYNAMORIO_CROSS_AARCHXX_LINUX_ONLY'} eq 'yes') &&
         $args =~ /64_only/) {
-        # Dr. Memory is not ported to AArch64 yet.
+        # Dr. Memory is not ported to AArch64/RISC-V yet.
     } else {
         $args .= ";invoke=${osdir}/../drmemory/package.cmake;drmem_only";
     }
@@ -223,7 +225,6 @@ for (my $i = 0; $i <= $#lines; ++$i) {
                 'code_api|client.drwrap-test-detach' => 1, # i#4616
                 'code_api|client.cbr4' => 1, # i#4792
                 'code_api|win32.hookerfirst' => 1, # i#4870
-                'code_api|client.attach_test' => 1, # i#725
                 'code_api|client.winxfer' => 1, # i#4732
                 # These are from earlier runs on Appveyor:
                 'code_api|security-common.retnonexisting' => 1,
@@ -264,7 +265,6 @@ for (my $i = 0; $i <= $#lines; ++$i) {
                 'code_api|tool.histogram.offline' => 1, # i#4621
                 'code_api|tool.drcacheoff.burst_static' => 1, # i#4486
                 'code_api|tool.drcacheoff.burst_replace' => 1, # i#4486
-                'code_api|client.attach_test' => 1, # i#725
                 # i#4617: These need build-and-test to build
                 # the 32-bit test app in our separate 64-bit job.
                 'code_api|win32.mixedmode_late' => 1, # i#4617
@@ -304,6 +304,9 @@ for (my $i = 0; $i <= $#lines; ++$i) {
                 # We list this without any "options|" which will match all variations.
                 'common.floatpc_xl8all' => 1, # i#2267
                 'code_api|client.file_io' => 1, # i#5802
+                # These we have failed to reproduce after many attempts under tmate.
+                'code_api|tool.drcacheoff.burst_traceopts' => 1, # i#6423
+                'code_api|tool.drcacheoff.burst_replaceall' => 1, # i#5412
                 );
             if ($is_long) {
                 # These are important tests so we only ignore in the long suite,
@@ -339,8 +342,6 @@ for (my $i = 0; $i <= $#lines; ++$i) {
                                    'code_api|linux.fib-conflict-early' => 1,
                                    'code_api|linux.mangle_asynch' => 1,
                                    'code_api,tracedump_text,tracedump_origins,syntax_intel|common.loglevel' => 1, # i#1807
-                                   'code_api|client.attach_test' => 1, # i#5740
-                                   'code_api|client.attach_blocking' => 1, # i#5740
                                    'code_api|tool.drcacheoff.rseq' => 1, # i#5734
                                    'code_api|tool.drcacheoff.windows-zlib' => 1, # i#5507
                                    );
@@ -349,6 +350,13 @@ for (my $i = 0; $i <= $#lines; ++$i) {
             } else {
                 $issue_no = "#2417";
             }
+        } elsif ($is_x86_64 && ($ENV{'DYNAMORIO_CROSS_AARCHXX_LINUX_ONLY'} eq 'yes') && $args =~ /64_only/) {
+            # These AArch64 cross-compiled tests fail on x86-64 QEMU but pass
+            # on native AArch64 hardware.
+            $ignore_failures_64{'code_api|client.drx_buf-test'} = 1;
+            $ignore_failures_64{'code_api|sample.memval_simple'} = 1;
+            $ignore_failures_64{'code_api|client.drreg-test'} = 1;
+            $issue_no = "#6260";
         } elsif ($^O eq 'darwin') {
             %ignore_failures_32 = ('code_api|common.decode-bad' => 1, # i#3127
                                    'code_api|linux.signal0000' => 1, # i#3127
@@ -361,6 +369,8 @@ for (my $i = 0; $i <= $#lines; ++$i) {
                                    'code_api|client.exception' => 1, # i#3127
                                    'code_api|client.timer' => 1, # i#3127
                                    'code_api|sample.signal' => 1); # i#3127
+        } elsif ($is_riscv64) {
+            %ignore_failures_64 = ();
         } else {
             %ignore_failures_32 = (
                 'code_api|pthreads.ptsig' => 1, # i#2921
@@ -379,6 +389,8 @@ for (my $i = 0; $i <= $#lines; ++$i) {
                 );
             %ignore_failures_64 = (
                 'code_api|tool.drcacheoff.burst_threadfilter' => 1, # i#2941
+                'code_api|client.attach_test' => 1, # i#6452
+                'code_api|client.detach_test' => 1, # i#6536
                 # These are from the long suite.
                 'code_api,opt_memory|common.loglevel' => 1, # i#1807
                 'code_api,opt_speed|common.decode-stress' => 1, # i#1807

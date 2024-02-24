@@ -1,5 +1,5 @@
 # **********************************************************
-# Copyright (c) 2020-2023 Google, Inc.  All rights reserved.
+# Copyright (c) 2020-2024 Google, Inc.  All rights reserved.
 # **********************************************************
 
 # Redistribution and use in source and binary forms, with or without
@@ -69,7 +69,7 @@ jobs:
         # We do shallow clones and assume DrM will update its DR at least once
         # every 250 DR commits.
         git clone --depth=2 https://github.com/DynamoRIO/drmemory.git drmemory
-        cd drmemory && git submodule update --init --depth 250 && cd ..
+        cd drmemory && git submodule update --init --recursive --depth 250 && cd ..
 
     # Install multilib for non-cross-compiling Linux build.
     # GA CI uses packages.microsoft.com which is missing i386 packages, and
@@ -81,7 +81,8 @@ jobs:
         sudo apt-get -y install doxygen vera++ zlib1g-dev libsnappy-dev \
           liblz4-dev g++-multilib libunwind-dev
         sudo add-apt-repository 'deb [arch=i386] http://us.archive.ubuntu.com/ubuntu focal main'
-        apt download libunwind8:i386 libunwind-dev:i386 liblzma5:i386
+        apt download libunwind8:i386 libunwind-dev:i386 liblzma5:i386 \
+          zlib1g:i386 zlib1g-dev:i386
         mkdir ../extract
         for i in *.deb; do dpkg-deb -x $i ../extract; done
         sudo rsync -av ../extract/usr/lib/i386-linux-gnu/ /usr/lib/i386-linux-gnu/
@@ -102,7 +103,7 @@ jobs:
       # We only use a non-zero build # when making multiple manual builds in one day.
       run: |
         if test -z "${{ github.event.inputs.version }}"; then
-          export VERSION_NUMBER=9.91.$((`git log -n 1 --format=%ct` / (60*60*24)))
+          export VERSION_NUMBER=10.0.$((`git log -n 1 --format=%ct` / (60*60*24)))
         else
           export VERSION_NUMBER=${{ github.event.inputs.version }}
         fi
@@ -170,7 +171,7 @@ jobs:
         git fetch --no-tags --depth=1 origin master
         # Include Dr. Memory in packages.
         git clone --depth=2 https://github.com/DynamoRIO/drmemory.git drmemory
-        cd drmemory && git submodule update --init --depth 250 && cd ..
+        cd drmemory && git submodule update --init --recursive --depth 250 && cd ..
 
     # Install cross-compiler for cross-compiling Linux build.
     # Unfortunately there are no libunwind or compression cross-compile
@@ -194,7 +195,7 @@ jobs:
       # XXX: See x86 job comments on sharing the default ver# with CMakeLists.txt.
       run: |
         if test -z "${{ github.event.inputs.version }}"; then
-          export VERSION_NUMBER=9.91.$((`git log -n 1 --format=%ct` / (60*60*24)))
+          export VERSION_NUMBER=10.0.$((`git log -n 1 --format=%ct` / (60*60*24)))
         else
           export VERSION_NUMBER=${{ github.event.inputs.version }}
         fi
@@ -258,7 +259,7 @@ jobs:
         git fetch --no-tags --depth=1 origin master
         # Include Dr. Memory in packages.
         git clone --depth=2 https://github.com/DynamoRIO/drmemory.git drmemory
-        cd drmemory && git submodule update --init --depth 250 && cd ..
+        cd drmemory && git submodule update --init --recursive --depth 250 && cd ..
 
     # Install cross-compiler for cross-compiling Linux build.
     # Unfortunately there are no libunwind or compression cross-compile
@@ -282,7 +283,7 @@ jobs:
       # XXX: See x86 job comments on sharing the default ver# with CMakeLists.txt.
       run: |
         if test -z "${{ github.event.inputs.version }}"; then
-          export VERSION_NUMBER=9.91.$((`git log -n 1 --format=%ct` / (60*60*24)))
+          export VERSION_NUMBER=10.0.$((`git log -n 1 --format=%ct` / (60*60*24)))
         else
           export VERSION_NUMBER=${{ github.event.inputs.version }}
         fi
@@ -346,7 +347,7 @@ jobs:
         git fetch --no-tags --depth=1 origin master
         # Include Dr. Memory in packages.
         git clone --depth=2 https://github.com/DynamoRIO/drmemory.git drmemory
-        cd drmemory && git submodule update --init --depth 250 && cd ..
+        cd drmemory && git submodule update --init --recursive --depth 250 && cd ..
 
     # Fetch and install Android NDK for Andoid cross-compile build.
     - name: Create Build Environment
@@ -370,7 +371,7 @@ jobs:
       # XXX: See x86 job comments on sharing the default ver# with CMakeLists.txt.
       run: |
         if test -z "${{ github.event.inputs.version }}"; then
-          export VERSION_NUMBER=9.91.$((`git log -n 1 --format=%ct` / (60*60*24)))
+          export VERSION_NUMBER=10.0.$((`git log -n 1 --format=%ct` / (60*60*24)))
         else
           export VERSION_NUMBER=${{ github.event.inputs.version }}
         fi
@@ -436,7 +437,7 @@ jobs:
         git fetch --no-tags --depth=1 origin master
         # Include Dr. Memory in packages.
         git clone --depth=2 https://github.com/DynamoRIO/drmemory.git drmemory
-        cd drmemory && git submodule update --init --depth 250 && cd ..
+        cd drmemory && git submodule update --init --recursive --depth 250 && cd ..
 
     - name: Download Packages
       shell: powershell
@@ -450,7 +451,7 @@ jobs:
       # XXX: See x86 job comments on sharing the default ver# with CMakeLists.txt.
       run: |
         if test -z "${{ github.event.inputs.version }}"; then
-          export VERSION_NUMBER=9.91.$((`git log -n 1 --format=%ct` / (60*60*24)))
+          export VERSION_NUMBER=10.0.$((`git log -n 1 --format=%ct` / (60*60*24)))
         else
           export VERSION_NUMBER=${{ github.event.inputs.version }}
         fi
@@ -535,7 +536,7 @@ jobs:
       # XXX: See x86 job comments on sharing the default ver# with CMakeLists.txt.
       run: |
         if test -z "${{ github.event.inputs.version }}"; then
-          export VERSION_NUMBER="9.91.$((`git log -n 1 --format=%ct` / (60*60*24)))"
+          export VERSION_NUMBER="10.0.$((`git log -n 1 --format=%ct` / (60*60*24)))"
           export PREFIX="cronbuild-"
         else
           export VERSION_NUMBER=${{ github.event.inputs.version }}

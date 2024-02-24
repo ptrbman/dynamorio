@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2018-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2018-2023 Google, Inc.  All rights reserved.
  * **********************************************************/
 
 /*
@@ -33,15 +33,24 @@
 #ifndef _VIEW_H_
 #define _VIEW_H_ 1
 
+#include <stdint.h>
+
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 
+#include "dr_api.h" // Must be before trace_entry.h from analysis_tool.h.
 #include "analysis_tool.h"
+#include "memref.h"
+#include "memtrace_stream.h"
 #include "raw2trace.h"
 #include "raw2trace_directory.h"
+
+namespace dynamorio {
+namespace drmemtrace {
 
 class view_t : public analysis_tool_t {
 public:
@@ -49,8 +58,8 @@ public:
     // OFFLINE_FILE_TYPE_ENCODINGS.
     // XXX: Once we update our toolchains to guarantee C++17 support we could use
     // std::optional here.
-    view_t(const std::string &module_file_path, memref_tid_t thread, uint64_t skip_refs,
-           uint64_t sim_refs, const std::string &syntax, unsigned int verbose,
+    view_t(const std::string &module_file_path, uint64_t skip_refs, uint64_t sim_refs,
+           const std::string &syntax, unsigned int verbose,
            const std::string &alt_module_dir = "");
     std::string
     initialize_stream(memtrace_stream_t *serial_stream) override;
@@ -132,7 +141,6 @@ protected:
     unsigned int knob_verbose_;
     int trace_version_;
     static const std::string TOOL_NAME;
-    memref_tid_t knob_thread_;
     uint64_t knob_skip_refs_;
     uint64_t skip_refs_left_;
     uint64_t knob_sim_refs_;
@@ -159,5 +167,8 @@ private:
     static constexpr int INSTR_COLUMN_WIDTH = 12;
     static constexpr int TID_COLUMN_WIDTH = 11;
 };
+
+} // namespace drmemtrace
+} // namespace dynamorio
 
 #endif /* _VIEW_H_ */

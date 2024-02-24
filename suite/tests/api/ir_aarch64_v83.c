@@ -289,6 +289,10 @@ TEST_INSTR(pauth_hints)
     TEST_NO_OPNDS(pacibsp, pacibsp, "pacibsp %x30 %sp -> %x30");
     TEST_NO_OPNDS(pacibz, pacibz, "pacibz %x30 -> %x30");
     TEST_NO_OPNDS(xpaclri, xpaclri, "xpaclri %x30 -> %x30");
+    TEST_NO_OPNDS(eretaa, eretaa, "eretaa %x30 %sp");
+    TEST_NO_OPNDS(eretab, eretab, "eretab %x30 %sp");
+    TEST_NO_OPNDS(retaa, retaa, "retaa  %x30 %sp");
+    TEST_NO_OPNDS(retab, retab, "retab  %x30 %sp");
 }
 
 TEST_INSTR(autib)
@@ -589,6 +593,62 @@ TEST_INSTR(xpaci)
     TEST_LOOP(xpaci, xpaci, 6, expected_0_0[i], opnd_create_reg(Xn_six_offset_0[i]));
 }
 
+TEST_INSTR(fjcvtzs)
+{
+    /* Testing FJCVTZS <Wd>, <Dn> */
+    const char *const expected_0_0[6] = {
+        "fjcvtzs %d0 -> %w0",   "fjcvtzs %d6 -> %w5",   "fjcvtzs %d11 -> %w10",
+        "fjcvtzs %d17 -> %w15", "fjcvtzs %d22 -> %w20", "fjcvtzs %d31 -> %w30",
+    };
+    TEST_LOOP(fjcvtzs, fjcvtzs, 6, expected_0_0[i], opnd_create_reg(Wn_six_offset_0[i]),
+              opnd_create_reg(Vdn_d_six_offset_1[i]));
+}
+
+TEST_INSTR(ldapr)
+{
+    /* Testing LDAPR <Wt>, [<Xn|SP>{,#0}] */
+    const char *const expected_0_0[6] = {
+        "ldapr  (%x0)[4byte] -> %w0",   "ldapr  (%x5)[4byte] -> %w6",
+        "ldapr  (%x10)[4byte] -> %w11", "ldapr  (%x15)[4byte] -> %w16",
+        "ldapr  (%x20)[4byte] -> %w21", "ldapr  (%sp)[4byte] -> %wzr",
+    };
+    TEST_LOOP(ldapr, ldapr, 6, expected_0_0[i], opnd_create_reg(Wn_six_offset_1_zr[i]),
+              OPND_CREATE_MEM32(Xn_six_offset_0_sp[i], 0));
+
+    /* Testing LDAPR <Xt>, [<Xn|SP>{,#0}] */
+    const char *const expected_1_0[6] = {
+        "ldapr  (%x0)[8byte] -> %x0",   "ldapr  (%x5)[8byte] -> %x6",
+        "ldapr  (%x10)[8byte] -> %x11", "ldapr  (%x15)[8byte] -> %x16",
+        "ldapr  (%x20)[8byte] -> %x21", "ldapr  (%sp)[8byte] -> %xzr",
+    };
+    TEST_LOOP(ldapr, ldapr, 6, expected_1_0[i], opnd_create_reg(Xn_six_offset_1_zr[i]),
+              OPND_CREATE_MEM64(Xn_six_offset_0_sp[i], 0));
+}
+
+TEST_INSTR(ldaprb)
+{
+    /* Testing LDAPRB <Wt>, [<Xn|SP>{,#0}] */
+    const char *const expected_0_0[6] = {
+        "ldaprb (%x0)[1byte] -> %w0",   "ldaprb (%x5)[1byte] -> %w6",
+        "ldaprb (%x10)[1byte] -> %w11", "ldaprb (%x15)[1byte] -> %w16",
+        "ldaprb (%x20)[1byte] -> %w21", "ldaprb (%sp)[1byte] -> %wzr",
+    };
+    TEST_LOOP(ldaprb, ldaprb, 6, expected_0_0[i], opnd_create_reg(Wn_six_offset_1_zr[i]),
+              OPND_CREATE_MEM8(Xn_six_offset_0_sp[i], 0));
+}
+
+TEST_INSTR(ldaprh)
+{
+    /* Testing LDAPRH <Wt>, [<Xn|SP>{,#0}] */
+    const char *const expected_0_0[6] = {
+        "ldaprh (%x0)[2byte] -> %w0",   "ldaprh (%x5)[2byte] -> %w6",
+        "ldaprh (%x10)[2byte] -> %w11", "ldaprh (%x15)[2byte] -> %w16",
+        "ldaprh (%x20)[2byte] -> %w21", "ldaprh (%sp)[2byte] -> %wzr",
+    };
+    TEST_LOOP(ldaprh, ldaprh, 6, expected_0_0[i], opnd_create_reg(Wn_six_offset_1_zr[i]),
+              OPND_CREATE_MEM16(Xn_six_offset_0_sp[i], 0));
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -600,6 +660,8 @@ main(int argc, char *argv[])
     bool result = true;
     bool test_result;
     instr_t *instr;
+
+    enable_all_test_cpu_features();
 
     RUN_INSTR_TEST(fcadd_vector);
     RUN_INSTR_TEST(fcmla_vector);
@@ -636,6 +698,14 @@ main(int argc, char *argv[])
     RUN_INSTR_TEST(ldrab);
     RUN_INSTR_TEST(xpacd);
     RUN_INSTR_TEST(xpaci);
+
+    /* FEAT_JSCVT */
+    RUN_INSTR_TEST(fjcvtzs);
+
+    /* FEAT_LRCPC */
+    RUN_INSTR_TEST(ldapr);
+    RUN_INSTR_TEST(ldaprb);
+    RUN_INSTR_TEST(ldaprh);
 
     print("All v8.3 tests complete.");
 #ifndef STANDALONE_DECODER

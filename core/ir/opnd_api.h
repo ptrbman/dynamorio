@@ -1,5 +1,5 @@
 /* **********************************************************
- * Copyright (c) 2010-2021 Google, Inc.  All rights reserved.
+ * Copyright (c) 2010-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2002-2010 VMware, Inc.  All rights reserved.
  * **********************************************************/
 
@@ -1038,6 +1038,8 @@ enum {
     DR_REG_P13, /**< The "p13" register. */
     DR_REG_P14, /**< The "p14" register. */
     DR_REG_P15, /**< The "p15" register. */
+
+    DR_REG_FFR, /**< The SVE First-Fault Register. */
 #    endif
 
 #    ifdef AARCH64
@@ -1172,7 +1174,6 @@ enum {
     DR_REG_X29,     /**< The x29(t4) register. */
     DR_REG_X30,     /**< The x30(t5) register. */
     DR_REG_X31,     /**< The x31(t6) register. */
-    DR_REG_PC,      /**< The program counter. */
     /* GPR aliases */
     DR_REG_ZERO = DR_REG_X0, /**< The hard-wired zero (x0) register. */
     DR_REG_RA = DR_REG_X1,   /**< The return address (x1) register. */
@@ -1207,6 +1208,7 @@ enum {
     DR_REG_T4 = DR_REG_X29,  /**< The 5th temporary (x29) register. */
     DR_REG_T5 = DR_REG_X30,  /**< The 6th temporary (x30) register. */
     DR_REG_T6 = DR_REG_X31,  /**< The 7th temporary (x31) register. */
+    DR_REG_PC,               /**< The program counter. */
     /* Floating point registers */
     DR_REG_F0,   /**< The f0(ft0) floating-point register. */
     DR_REG_F1,   /**< The f1(ft1) floating-point register. */
@@ -1282,15 +1284,18 @@ enum {
     DR_REG_LAST_VALID_ENUM = DR_REG_FCSR, /**< Last valid register enum. */
     DR_REG_LAST_ENUM = DR_REG_FCSR,       /**< Last value of register enums. */
 
-    DR_REG_START_64 = DR_REG_X0,  /**< Start of 64-bit general register enum values. */
-    DR_REG_STOP_64 = DR_REG_X31,  /**< End of 64-bit general register enum values. */
-    DR_REG_START_32 = DR_REG_X0,  /**< Start of 32-bit general register enum values. */
-    DR_REG_STOP_32 = DR_REG_X31,  /**< End of 32-bit general register enum values. */
-    DR_REG_START_GPR = DR_REG_X0, /**< Start of general register registers. */
-    DR_REG_STOP_GPR = DR_REG_X31, /**< End of general register registers. */
+    DR_REG_START_64 = DR_REG_X1,  /**< Start of 64-bit register enum values. */
+    DR_REG_STOP_64 = DR_REG_F31,  /**< End of 64-bit register enum values. */
+    DR_REG_START_32 = DR_REG_X1,  /**< Start of 32-bit register enum values. */
+    DR_REG_STOP_32 = DR_REG_F31,  /**< End of 32-bit register enum values. */
+    DR_REG_START_GPR = DR_REG_X1, /**< Start of general registers. */
+    DR_REG_STOP_GPR = DR_REG_X31, /**< End of general registers. */
+    DR_REG_START_FPR = DR_REG_F0, /**< Start of floating-point registers. */
+    DR_REG_STOP_FPR = DR_REG_F31, /**< End of floating-point registers. */
     DR_REG_XSP = DR_REG_SP, /**< Platform-independent way to refer to stack pointer. */
 
     DR_NUM_GPR_REGS = DR_REG_STOP_GPR - DR_REG_START_GPR + 1, /**< Count of GPR regs. */
+    DR_NUM_FPR_REGS = DR_REG_STOP_FPR - DR_REG_START_FPR + 1, /**< Count of FPR regs. */
     DR_NUM_SIMD_VECTOR_REGS = 0,                              /**< Count of SIMD regs. */
 #else /* RISCV64 */
 #    error Register definitions missing for this platform.
@@ -1404,11 +1409,13 @@ typedef byte opnd_size_t; /**< The type of an OPSZ_ enum value. */
 #    define DR_REG_STOP_FLOAT \
         DR_REG_ST7 /**< End of floating-point-register enum values */
 #    define DR_REG_START_SEGMENT DR_SEG_ES /**< Start of segment register enum values */
-#    define DR_REG_STOP_SEGMENT DR_SEG_GS  /**< End of segment register enum values */
-#    define DR_REG_START_DR DR_REG_DR0     /**< Start of debug register enum values */
-#    define DR_REG_STOP_DR DR_REG_DR15     /**< End of debug register enum values */
-#    define DR_REG_START_CR DR_REG_CR0     /**< Start of control register enum values */
-#    define DR_REG_STOP_CR DR_REG_CR15     /**< End of control register enum values */
+#    define DR_REG_START_SEGMENT_x64 \
+        DR_SEG_FS /**< Start of segment register enum values for x64 */
+#    define DR_REG_STOP_SEGMENT DR_SEG_GS /**< End of segment register enum values */
+#    define DR_REG_START_DR DR_REG_DR0    /**< Start of debug register enum values */
+#    define DR_REG_STOP_DR DR_REG_DR15    /**< End of debug register enum values */
+#    define DR_REG_START_CR DR_REG_CR0    /**< Start of control register enum values */
+#    define DR_REG_STOP_CR DR_REG_CR15    /**< End of control register enum values */
 /**
  * Last valid register enum value.  Note: DR_REG_INVALID is now smaller
  * than this value.
@@ -1598,6 +1605,7 @@ typedef byte opnd_size_t; /**< The type of an OPSZ_ enum value. */
 #    define REG_START_FLOAT DR_REG_START_FLOAT
 #    define REG_STOP_FLOAT DR_REG_STOP_FLOAT
 #    define REG_START_SEGMENT DR_REG_START_SEGMENT
+#    define REG_START_SEGMENT_x64 DR_REG_START_SEGMENT_x64
 #    define REG_STOP_SEGMENT DR_REG_STOP_SEGMENT
 #    define REG_START_DR DR_REG_START_DR
 #    define REG_STOP_DR DR_REG_STOP_DR
@@ -1656,14 +1664,15 @@ typedef enum _dr_shift_type_t {
  * instruction.
  */
 typedef enum _dr_extend_type_t {
-    DR_EXTEND_UXTB = 0, /**< Unsigned extend byte. */
-    DR_EXTEND_UXTH,     /**< Unsigned extend halfword. */
-    DR_EXTEND_UXTW,     /**< Unsigned extend word. */
-    DR_EXTEND_UXTX,     /**< Unsigned extend doubleword (a no-op). */
-    DR_EXTEND_SXTB,     /**< Signed extend byte. */
-    DR_EXTEND_SXTH,     /**< Signed extend halfword. */
-    DR_EXTEND_SXTW,     /**< Signed extend word. */
-    DR_EXTEND_SXTX,     /**< Signed extend doubleword (a no-op). */
+    DR_EXTEND_DEFAULT = 0, /**< Default value. */
+    DR_EXTEND_UXTB = 0,    /**< Unsigned extend byte. */
+    DR_EXTEND_UXTH,        /**< Unsigned extend halfword. */
+    DR_EXTEND_UXTW,        /**< Unsigned extend word. */
+    DR_EXTEND_UXTX,        /**< Unsigned extend doubleword (a no-op). */
+    DR_EXTEND_SXTB,        /**< Signed extend byte. */
+    DR_EXTEND_SXTH,        /**< Signed extend halfword. */
+    DR_EXTEND_SXTW,        /**< Signed extend word. */
+    DR_EXTEND_SXTX,        /**< Signed extend doubleword (a no-op). */
 } dr_extend_type_t;
 
 /**
@@ -1716,6 +1725,8 @@ typedef enum _dr_pred_constr_type_t {
  * displacement before it is added to or subtracted from the base register.
  */
 typedef enum _dr_opnd_flags_t {
+    /** Default (no additional flags). */
+    DR_OPND_DEFAULT = 0x00,
     /** This register's value is negated prior to use in the containing instruction. */
     DR_OPND_NEGATED = 0x01,
     /**
@@ -1762,7 +1773,7 @@ typedef enum _dr_opnd_flags_t {
      */
     DR_OPND_IS_VECTOR = 0x100,
     /**
-     * Predicate registers can either be merging, zero or neither. If one of these
+     * SVE predicate registers can either be merging, zero or neither. If one of these
      * are set then they are either a merge or zero otherwise aren't either.
      */
     DR_OPND_IS_MERGE_PREDICATE = 0x200,
@@ -1772,6 +1783,22 @@ typedef enum _dr_opnd_flags_t {
      * SVE predicate constraint
      */
     DR_OPND_IS_PREDICATE_CONSTRAINT = 0x800,
+
+    /**
+     * This is used by RISCV64 for immediates display format.
+     */
+    DR_OPND_IMM_PRINT_DECIMAL = 0x1000,
+
+    /**
+     * The register number is not in the instruction encoding but is calculated
+     * based on another register
+     */
+    DR_OPND_IMPLICIT = 0x2000,
+    /**
+     * The register is a SVE governing predicate register: it is used to select
+     * which elements of a vector are actually read or written to in AArch64 SVE
+     */
+    DR_OPND_IS_GOVERNING = 0x4000,
 } dr_opnd_flags_t;
 
 #ifdef DR_FAST_IR
@@ -1917,7 +1944,7 @@ enum {
     FAR_PC_kind,    /* a segment is specified as a selector value */
     FAR_INSTR_kind, /* a segment is specified as a selector value */
 #    if defined(X64) || defined(ARM)
-    REL_ADDR_kind, /* pc-relative address: ARM or 64-bit X86 only */
+    REL_ADDR_kind, /* pc-relative address: ARM/RISCV64/64-bit X86 only */
 #    endif
 #    ifdef X64
     ABS_ADDR_kind, /* 64-bit absolute address: x64 only */
@@ -2163,7 +2190,8 @@ DR_API
  *    needs to be specified for an absolute address; otherwise, simply
  *    use the desired short registers for base and/or index).
  *
- * (The encoding optimization flags are all false when using opnd_create_base_disp()).
+ * (The encoding optimization flags are all false when using
+ * opnd_create_base_disp()).
  */
 opnd_t
 opnd_create_base_disp_ex(reg_id_t base_reg, reg_id_t index_reg, int scale, int disp,
@@ -2546,21 +2574,27 @@ opnd_is_element_vector_reg(opnd_t opnd);
 
 DR_API
 INSTR_INLINE
-/** Returns true iff \p opnd is a predicate register. */
+/** Returns true iff \p opnd is an SVE predicate register. */
 bool
 opnd_is_predicate_reg(opnd_t opnd);
 
 DR_API
 INSTR_INLINE
-/** Returns true iff \p opnd is a merging predicate register. */
+/** Returns true iff \p opnd is a n SVE merging predicate register. */
 bool
 opnd_is_predicate_merge(opnd_t opnd);
 
 DR_API
 INSTR_INLINE
-/** Returns true iff \p opnd is a zeroing predicate register. */
+/** Returns true iff \p opnd is an SVE zeroing predicate register. */
 bool
 opnd_is_predicate_zero(opnd_t opnd);
+
+DR_API
+INSTR_INLINE
+/** Returns true iff \p opnd is an SVE governing predicate register. */
+bool
+opnd_is_governing(opnd_t opnd);
 
 DR_API
 /**
@@ -2874,7 +2908,7 @@ DR_API
  * \note ARM-only.
  */
 dr_shift_type_t
-opnd_get_index_shift(opnd_t opnd, uint *amount OUT);
+opnd_get_index_shift(opnd_t opnd, uint *amount DR_PARAM_OUT);
 
 DR_API
 /**
@@ -2899,7 +2933,7 @@ DR_API
  * \note AArch64-only.
  */
 dr_extend_type_t
-opnd_get_index_extend(opnd_t opnd, OUT bool *scaled, OUT uint *amount);
+opnd_get_index_extend(opnd_t opnd, DR_PARAM_OUT bool *scaled, DR_PARAM_OUT uint *amount);
 
 DR_API
 /**
@@ -3460,7 +3494,7 @@ DR_API
  * requested register.
  */
 bool
-reg_get_value_ex(reg_id_t reg, dr_mcontext_t *mc, OUT byte *val);
+reg_get_value_ex(reg_id_t reg, dr_mcontext_t *mc, DR_PARAM_OUT byte *val);
 
 DR_API
 /**
@@ -3489,7 +3523,7 @@ DR_API
  * Returns false if the register is not supported.
  */
 bool
-reg_set_value_ex(reg_id_t reg, dr_mcontext_t *mc, IN byte *val_buf);
+reg_set_value_ex(reg_id_t reg, dr_mcontext_t *mc, DR_PARAM_IN byte *val_buf);
 
 DR_API
 /**

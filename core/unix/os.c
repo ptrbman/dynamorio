@@ -1,5 +1,5 @@
 /* *******************************************************************************
- * Copyright (c) 2010-2022 Google, Inc.  All rights reserved.
+ * Copyright (c) 2010-2023 Google, Inc.  All rights reserved.
  * Copyright (c) 2011 Massachusetts Institute of Technology  All rights reserved.
  * Copyright (c) 2000-2010 VMware, Inc.  All rights reserved.
  * *******************************************************************************/
@@ -762,11 +762,14 @@ our_init(int argc, char **argv, char **envp)
     return 0;
 }
 
-#if defined(STATIC_LIBRARY) || defined(STANDALONE_UNIT_TEST)
+#if defined(STATIC_LIBRARY) || defined(STANDALONE_UNIT_TEST) || defined(RISCV64)
 /* If we're getting linked into a binary that already has an _init definition
  * like the app's exe or unit_tests, we add a pointer to our_init() to the
  * .init_array section.  We can't use the constructor attribute because not all
  * toolchains pass the args and environment to the constructor.
+ *
+ * RISC-V, as a new ISA, does not support obsolete .init section, so we always use
+ * .init_array section for RISC-V.
  */
 static init_fn_t
 #    ifdef MACOS
@@ -1217,7 +1220,7 @@ get_application_short_name(void)
  * by get_app_args().
  */
 void
-set_app_args(IN int *app_argc_in, IN char **app_argv_in)
+set_app_args(DR_PARAM_IN int *app_argc_in, DR_PARAM_IN char **app_argv_in)
 {
     app_argc = app_argc_in;
     app_argv = app_argv_in;
@@ -1237,7 +1240,7 @@ num_app_args()
 
 /* Returns the application's command-line arguments. */
 int
-get_app_args(OUT dr_app_arg_t *args_array, int args_count)
+get_app_args(DR_PARAM_OUT dr_app_arg_t *args_array, int args_count)
 {
     if (args_array == NULL || args_count < 0) {
         set_client_error_code(NULL, DR_ERROR_INVALID_PARAMETER);
@@ -1326,14 +1329,22 @@ uint
 query_time_seconds(void)
 {
     struct timeval current_time;
+#if defined(MACOS) && defined(AARCH64)
+    /* TODO i#5383: Replace with a system call (unless we're sure this library call
+     * is re-entrant, just a simple load from commpage).
+     */
+#    undef gettimeofday /* Remove "gettimeofday_forbidden_function". */
+    uint64 val = gettimeofday(&current_time, NULL);
+#else
     uint64 val = dynamorio_syscall(SYS_gettimeofday, 2, &current_time, NULL);
-#ifdef MACOS
+#    ifdef MACOS
     /* MacOS before Sierra returns usecs:secs and does not set the timeval struct. */
     if (macos_version < MACOS_VERSION_SIERRA) {
         if ((int)val < 0)
             return 0;
         return (uint)val + UTC_TO_EPOCH_SECONDS;
     }
+#    endif
 #endif
     if ((int)val >= 0) {
         return current_time.tv_sec + UTC_TO_EPOCH_SECONDS;
@@ -1355,7 +1366,9 @@ query_time_millis()
 #if !(defined(MACOS) && defined(AARCH64))
     uint64 val = dynamorio_syscall(SYS_gettimeofday, 2, &current_time, NULL);
 #else
-    /* TODO i#5383: Replace with a system call. */
+    /* TODO i#5383: Replace with a system call (unless we're sure this library call
+     * is re-entrant, just a simple load from commpage).
+     */
 #    undef gettimeofday /* Remove "gettimeofday_forbidden_function". */
     uint64 val = gettimeofday(&current_time, NULL);
 #endif
@@ -1730,14 +1743,14 @@ os_timeout(int time_in_milliseconds)
             ASSERT(sizeof(var) == sizeof(void *));                     \
             __asm__ __volatile__("ld %0, %1(tp) \n\t"                  \
                                  "ld %0, %2(%0) \n\t"                  \
-                                 : "=r"(var)                           \
+                                 : "+r"(var)                           \
                                  : "i"(DR_TLS_BASE_OFFSET), "i"(imm)); \
         } while (0)
 #    define WRITE_TLS_INT_SLOT_IMM(imm, var)                                   \
         do {                                                                   \
             IF_NOT_HAVE_TLS(ASSERT_NOT_REACHED());                             \
-            ASSERT(sizeof(var) == sizeof(void *));                             \
-            __asm__ __volatile__("lw t0, %0(tp) \n\t"                          \
+            ASSERT(sizeof(var) == sizeof(int));                                \
+            __asm__ __volatile__("ld t0, %0(tp) \n\t"                          \
                                  "sw %1, %2(t0) \n\t"                          \
                                  :                                             \
                                  : "i"(DR_TLS_BASE_OFFSET), "r"(var), "i"(imm) \
@@ -1746,8 +1759,8 @@ os_timeout(int time_in_milliseconds)
 #    define READ_TLS_INT_SLOT_IMM(imm, var)                            \
         do {                                                           \
             IF_NOT_HAVE_TLS(ASSERT_NOT_REACHED());                     \
-            ASSERT(sizeof(var) == sizeof(void *));                     \
-            __asm__ __volatile__("lw %0, %1(tp) \n\t"                  \
+            ASSERT(sizeof(var) == sizeof(int));                        \
+            __asm__ __volatile__("ld %0, %1(tp) \n\t"                  \
                                  "lw %0, %2(%0) \n\t"                  \
                                  : "=r"(var)                           \
                                  : "i"(DR_TLS_BASE_OFFSET), "i"(imm)); \
@@ -1868,7 +1881,7 @@ is_thread_tls_initialized(void)
         } else
             return false;
     }
-#elif defined(AARCHXX)
+#elif defined(AARCHXX) || defined(RISCV64)
     byte **dr_tls_base_addr;
     if (tls_global_type == TLS_TYPE_NONE)
         return false;
@@ -1883,10 +1896,6 @@ is_thread_tls_initialized(void)
      * deadlock_avoidance_unlock() which calls get_thread_private_dcontext()
      * which comes here.
      */
-    return true;
-#else
-    /* FIXME i#3544: Not implemented */
-    ASSERT_NOT_IMPLEMENTED(false);
     return true;
 #endif
     return true;
@@ -1982,7 +1991,7 @@ os_get_priv_tls_base(dcontext_t *dcontext, reg_id_t reg)
 os_local_state_t *
 get_os_tls(void)
 {
-    os_local_state_t *os_tls;
+    os_local_state_t *os_tls = NULL;
     ASSERT(is_thread_tls_initialized());
     READ_TLS_SLOT_IMM(TLS_SELF_OFFSET, os_tls);
     return os_tls;
@@ -2002,7 +2011,7 @@ get_os_tls_from_dc(dcontext_t *dcontext)
     return (os_local_state_t *)(local_state - offsetof(os_local_state_t, state));
 }
 
-#ifdef AARCHXX
+#if defined(AARCHXX) || defined(RISCV64)
 bool
 os_set_app_tls_base(dcontext_t *dcontext, reg_id_t reg, void *base)
 {
@@ -2104,7 +2113,7 @@ get_segment_base(uint seg)
 {
 #if defined(MACOS64) && defined(X86)
     ptr_uint_t *pthread_self = (ptr_uint_t *)read_thread_register(seg);
-    return (byte *)&pthread_self[SEG_TLS_BASE_OFFSET];
+    return (byte *)&pthread_self[SEG_TLS_BASE_SLOT];
 #elif defined(X86)
     if (seg == SEG_CS || seg == SEG_SS || seg == SEG_DS || seg == SEG_ES)
         return NULL;
@@ -2139,7 +2148,7 @@ get_app_segment_base(uint seg)
 local_state_extended_t *
 get_local_state_extended()
 {
-    os_local_state_t *os_tls;
+    os_local_state_t *os_tls = NULL;
     ASSERT(is_thread_tls_initialized());
     READ_TLS_SLOT_IMM(TLS_SELF_OFFSET, os_tls);
     return &(os_tls->state);
@@ -2159,7 +2168,7 @@ get_local_state()
 void
 os_enter_dynamorio(void)
 {
-#    ifdef ARM
+#    if (defined(AARCHXX) || defined(RISCV64)) && !defined(MACOS)
     /* i#1578: check that app's tls value doesn't match our sentinel */
     ASSERT(*(byte **)get_dr_tls_base_addr() != TLS_SLOT_VAL_EXITED);
 #    endif
@@ -2495,7 +2504,7 @@ os_tls_pre_init(int gdt_index)
 
 /* Allocates num_slots tls slots aligned with alignment align */
 bool
-os_tls_calloc(OUT uint *offset, uint num_slots, uint alignment)
+os_tls_calloc(DR_PARAM_OUT uint *offset, uint num_slots, uint alignment)
 {
     bool res = false;
     uint i, count = 0;
@@ -3051,7 +3060,7 @@ d_r_get_thread_id(void)
 thread_id_t
 get_tls_thread_id(void)
 {
-    ptr_int_t tid; /* can't use thread_id_t since it's 32-bits */
+    ptr_int_t tid = 0; /* can't use thread_id_t since it's 32-bits */
     if (!is_thread_tls_initialized())
         return INVALID_THREAD_ID;
     READ_TLS_SLOT_IMM(TLS_THREAD_ID_OFFSET, tid);
@@ -3068,7 +3077,7 @@ dcontext_t *
 get_thread_private_dcontext(void)
 {
 #ifdef HAVE_TLS
-    dcontext_t *dcontext;
+    dcontext_t *dcontext = NULL;
     /* We have to check this b/c this is called from __errno_location prior
      * to os_tls_init, as well as after os_tls_exit, and early in a new
      * thread's initialization (see comments below on that).
@@ -3182,7 +3191,7 @@ replace_thread_id(thread_id_t old, thread_id_t new)
     thread_id_t new_tid = new;
     ASSERT(is_thread_tls_initialized());
     DOCHECK(1, {
-        thread_id_t old_tid;
+        thread_id_t old_tid = 0;
         IF_LINUX_ELSE(READ_TLS_INT_SLOT_IMM(TLS_THREAD_ID_OFFSET, old_tid),
                       READ_TLS_SLOT_IMM(TLS_THREAD_ID_OFFSET, old_tid));
         ASSERT(old_tid == old);
@@ -3503,8 +3512,8 @@ os_heap_reserve(void *preferred, size_t size, heap_error_code_t *error_code,
 }
 
 static bool
-find_free_memory_in_region(byte *start, byte *end, size_t size, byte **found_start OUT,
-                           byte **found_end OUT)
+find_free_memory_in_region(byte *start, byte *end, size_t size,
+                           byte **found_start DR_PARAM_OUT, byte **found_end DR_PARAM_OUT)
 {
     memquery_iter_t iter;
     /* XXX: despite /proc/sys/vm/mmap_min_addr == PAGE_SIZE, mmap won't
@@ -3970,6 +3979,21 @@ thread_get_mcontext(thread_record_t *tr, priv_mcontext_t *mc)
     return true;
 }
 
+#ifdef LINUX
+bool
+thread_get_nudged_mcontext(thread_record_t *tr, priv_mcontext_t *mc)
+{
+    /* This only works for a thread that just received a nduge signal. */
+    os_thread_data_t *ostd = (os_thread_data_t *)tr->dcontext->os_field;
+    ASSERT(ostd != NULL);
+    ASSERT(ostd->nudged_sigcxt != NULL);
+    sigcontext_to_mcontext(mc, ostd->nudged_sigcxt, DR_MC_ALL);
+    IF_ARM(dr_set_isa_mode(tr->dcontext, get_sigcontext_isa_mode(ostd->nudged_sigcxt),
+                           NULL));
+    return true;
+}
+#endif
+
 bool
 thread_set_mcontext(thread_record_t *tr, priv_mcontext_t *mc)
 {
@@ -4030,6 +4054,12 @@ client_thread_run(void)
     dcontext_t *dcontext;
     byte *xsp;
     GET_STACK_PTR(xsp);
+#    ifdef AARCH64
+    /* AArch64's Scalable Vector Extension (SVE) requires more space on the
+     * stack. Align to page boundary, similar to that in get_clone_record().
+     */
+    xsp = (app_pc)ALIGN_BACKWARD(xsp, PAGE_SIZE);
+#    endif
     void *crec = get_clone_record((reg_t)xsp);
     /* i#2335: we support setup separate from start, and we want to allow a client
      * to create a client thread during init, but we do not support that thread
@@ -4110,7 +4140,7 @@ dr_create_client_thread(void (*func)(void *param), void *arg)
      * to the app's.
      */
     os_clone_pre(dcontext);
-#    ifdef AARCHXX
+#    if defined(AARCHXX) || defined(RISCV64)
     /* We need to invalidate DR's TLS to avoid get_thread_private_dcontext() finding one
      * and hitting asserts in dynamo_thread_init lock calls -- yet we don't want to for
      * app threads, so we're doing this here and not in os_clone_pre().
@@ -4122,7 +4152,7 @@ dr_create_client_thread(void (*func)(void *param), void *arg)
     thread_id_t newpid = dynamorio_clone(flags, xsp, NULL, NULL, NULL, client_thread_run);
     /* i#3526 switch DR's tls back to the original one before cloning. */
     os_clone_post(dcontext);
-#    ifdef AARCHXX
+#    if defined(AARCHXX) || defined(RISCV64)
     write_thread_register(tls);
 #    endif
     /* i#501 the app's tls was switched in os_clone_pre. */
@@ -4268,8 +4298,9 @@ shared_library_error(char *buf, int maxlen)
  * for linux, one of addr or name is needed; for windows, neither is needed.
  */
 bool
-shared_library_bounds(IN shlib_handle_t lib, IN byte *addr, IN const char *name,
-                      OUT byte **start, OUT byte **end)
+shared_library_bounds(DR_PARAM_IN shlib_handle_t lib, DR_PARAM_IN byte *addr,
+                      DR_PARAM_IN const char *name, DR_PARAM_OUT byte **start,
+                      DR_PARAM_OUT byte **end)
 {
     ASSERT(start != NULL && end != NULL);
     /* PR 366195: dlopen() handle truly is opaque, so we have to use either
@@ -4477,7 +4508,7 @@ os_write(file_t f, const void *buf, size_t count)
  * it here.  We use a loop to ensure reachability for the core.
  */
 byte *
-os_map_file(file_t f, size_t *size INOUT, uint64 offs, app_pc addr, uint prot,
+os_map_file(file_t f, size_t *size DR_PARAM_INOUT, uint64 offs, app_pc addr, uint prot,
             map_flags_t map_flags)
 {
     int flags;
@@ -4595,7 +4626,7 @@ os_unmap_file(byte *map, size_t size)
 
 #ifdef LINUX
 static void
-os_get_memory_file_shm_path(const char *name, OUT char *buf, size_t bufsz)
+os_get_memory_file_shm_path(const char *name, DR_PARAM_OUT char *buf, size_t bufsz)
 {
     snprintf(buf, bufsz, "/dev/shm/%s.%d", name, get_process_id());
     buf[bufsz - 1] = '\0';
@@ -5413,13 +5444,15 @@ syscall_successful(priv_mcontext_t *mc, int normalized_sysnum)
          * We defer to drsyscall.
          */
         return ((ptr_int_t)MCXT_SYSCALL_RES(mc) >= 0);
-    } else
+    } else {
 #    ifdef X86
         return !TEST(EFLAGS_CF, mc->xflags);
+#    elif defined(AARCH64)
+        return !TEST(EFLAGS_C, mc->xflags);
 #    else
-        return -1;
+#        error NYI
 #    endif
-
+    }
 #else
     if (normalized_sysnum == IF_X64_ELSE(SYS_mmap, SYS_mmap2) ||
 #    if !defined(ARM) && !defined(X64)
@@ -5441,11 +5474,17 @@ set_success_return_val(dcontext_t *dcontext, reg_t val)
 {
     /* since always coming from d_r_dispatch now, only need to set mcontext */
     priv_mcontext_t *mc = get_mcontext(dcontext);
-#if defined(MACOS) && defined(X86)
+#ifdef MACOS
     /* On MacOS, success is determined by CF, except for Mach syscalls, but
      * there it doesn't hurt to set CF.
      */
+#    ifdef X86
     mc->xflags &= ~(EFLAGS_CF);
+#    elif defined(AARCH64)
+    mc->xflags &= ~(EFLAGS_C);
+#    else
+#        error NYI
+#    endif
 #endif
     MCXT_SYSCALL_RES(mc) = val;
 }
@@ -5455,9 +5494,15 @@ static inline void
 set_failure_return_val(dcontext_t *dcontext, uint errno_val)
 {
     priv_mcontext_t *mc = get_mcontext(dcontext);
-#if defined(MACOS) && defined(X86)
+#ifdef MACOS
     /* On MacOS, success is determined by CF, and errno is positive */
+#    ifdef X86
     mc->xflags |= EFLAGS_CF;
+#    elif defined(AARCH64)
+    mc->xflags |= EFLAGS_C;
+#    else
+#        error NYI
+#    endif
     MCXT_SYSCALL_RES(mc) = errno_val;
 #else
     MCXT_SYSCALL_RES(mc) = -(int)errno_val;
@@ -5497,7 +5542,7 @@ dr_syscall_get_result(void *drcontext)
 
 DR_API
 bool
-dr_syscall_get_result_ex(void *drcontext, dr_syscall_result_info_t *info INOUT)
+dr_syscall_get_result_ex(void *drcontext, dr_syscall_result_info_t *info DR_PARAM_OUT)
 {
     dcontext_t *dcontext = (dcontext_t *)drcontext;
     priv_mcontext_t *mc = get_mcontext(dcontext);
@@ -6775,7 +6820,7 @@ os_switch_seg_to_context(dcontext_t *dcontext, reg_id_t seg, bool to_app)
         base = os_get_priv_tls_base(dcontext, seg);
     }
     return os_switch_seg_to_base(dcontext, os_tls, seg, to_app, base);
-#elif defined(AARCHXX)
+#elif defined(AARCHXX) || defined(RISCV64)
     bool res = false;
     os_thread_data_t *ostd = (os_thread_data_t *)dcontext->os_field;
     ASSERT(INTERNAL_OPTION(private_loader));
@@ -6861,12 +6906,6 @@ os_switch_seg_to_context(dcontext_t *dcontext, reg_id_t seg, bool to_app)
     LOG(THREAD, LOG_LOADER, 2, "%s %s: set_tls swap success=%d for thread " TIDFMT "\n",
         __FUNCTION__, to_app ? "to app" : "to DR", res, d_r_get_thread_id());
     return res;
-#elif defined(RISCV64)
-    /* FIXME i#3544: Not implemented */
-    ASSERT_NOT_IMPLEMENTED(false);
-    /* Marking as unused to silence -Wunused-variable. */
-    (void)os_tls;
-    return false;
 #endif /* X86/AARCHXX/RISCV64 */
 }
 
@@ -9757,7 +9796,7 @@ get_dynamorio_dll_preferred_base()
 }
 
 static void
-found_vsyscall_page(memquery_iter_t *iter _IF_DEBUG(OUT const char **map_type))
+found_vsyscall_page(memquery_iter_t *iter _IF_DEBUG(DR_PARAM_OUT const char **map_type))
 {
 #ifndef X64
     /* We assume no vsyscall page for x64; thus, checking the
@@ -10172,7 +10211,7 @@ at_initial_stack_bottom(dcontext_t *dcontext, app_pc target_pc)
 
 /* Uses our cached data structures (if in use, else raw query) to retrieve memory info */
 bool
-query_memory_ex(const byte *pc, OUT dr_mem_info_t *out_info)
+query_memory_ex(const byte *pc, DR_PARAM_OUT dr_mem_info_t *out_info)
 {
 #ifdef HAVE_MEMINFO_QUERY
     return query_memory_ex_from_os(pc, out_info);
@@ -10182,7 +10221,7 @@ query_memory_ex(const byte *pc, OUT dr_mem_info_t *out_info)
 }
 
 bool
-query_memory_cur_base(const byte *pc, OUT dr_mem_info_t *info)
+query_memory_cur_base(const byte *pc, DR_PARAM_OUT dr_mem_info_t *info)
 {
     return query_memory_ex(pc, info);
 }
@@ -10214,7 +10253,7 @@ get_memory_info(const byte *pc, byte **base_pc, size_t *size,
  * we try to do the same here.
  */
 bool
-query_memory_ex_from_os(const byte *pc, OUT dr_mem_info_t *info)
+query_memory_ex_from_os(const byte *pc, DR_PARAM_OUT dr_mem_info_t *info)
 {
     bool have_type = false;
     bool res = memquery_from_os(pc, info, &have_type);
@@ -10474,7 +10513,7 @@ wait_for_event(event_t e, int timeout_ms)
 #ifdef DEBUG
     dcontext_t *dcontext = get_thread_private_dcontext();
 #endif
-    uint64 start_time, cur_time;
+    uint64 start_time = 0, cur_time = 0;
     if (timeout_ms > 0)
         start_time = query_time_millis();
     /* Use a user-space event on Linux, a kernel event on Windows. */
