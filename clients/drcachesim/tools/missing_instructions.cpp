@@ -195,24 +195,24 @@ missing_instructions_t::create_experiment_insert_statement(
     // Check if the file is empty and write the header if it is
     std::ifstream check_file(experiments_filename);
     if (check_file.peek() == std::ifstream::traits_type::eof()) {
-        experiments_file << "Experiment ID, L1D Size, L1I Size, Num Cores, "
-                         << "L1I Assoc, L1D Assoc, LL Size, Line Size, LL Assoc, "
-                         << "Model Coherence, Replace Policy, Skip Refs, Warmup Refs, "
-                         << "Warmup Fraction, CPU Scheduling, Use Physical\n";
+        experiments_file << "Experiment ID; L1D Size; L1I Size; Num Cores; "
+                         << "L1I Assoc; L1D Assoc; LL Size; Line Size; LL Assoc; "
+                         << "Model Coherence; Replace Policy; Skip Refs; Warmup Refs; "
+                         << "Warmup Fraction; CPU Scheduling; Use Physical\n";
     }
     check_file.close();
 
     // Write experiment data to CSV
-    experiments_file << experiment_id << ", " << (knobs.L1D_size / 1024) << "K, "
-                     << (knobs.L1I_size / 1024) << "K, " << knobs.num_cores << ", "
-                     << knobs.L1I_assoc << ", " << knobs.L1D_assoc << ", "
-                     << (knobs.LL_size / (1024 * 1024)) << "M, " << knobs.line_size
-                     << ", " << knobs.LL_assoc << ", " << (knobs.model_coherence ? 1 : 0)
-                     << ", "
-                     << "'" << knobs.replace_policy << "', " << knobs.skip_refs << ", "
-                     << knobs.warmup_refs << ", " << knobs.warmup_fraction << ", " << 0
-                     << ", " // Assuming 0 for Sim Refs as per  method
-                     << (knobs.cpu_scheduling ? 1 : 0) << ", "
+    experiments_file << experiment_id << "; " << (knobs.L1D_size / 1024) << "K; "
+                     << (knobs.L1I_size / 1024) << "K; " << knobs.num_cores << "; "
+                     << knobs.L1I_assoc << "; " << knobs.L1D_assoc << "; "
+                     << (knobs.LL_size / (1024 * 1024)) << "M; " << knobs.line_size
+                     << "; " << knobs.LL_assoc << "; " << (knobs.model_coherence ? 1 : 0)
+                     << "; "
+                     << "'" << knobs.replace_policy << "'; " << knobs.skip_refs << "; "
+                     << knobs.warmup_refs << "; " << knobs.warmup_fraction << "; " << 0
+                     << "; " // Assuming 0 for Sim Refs as per  method
+                     << (knobs.cpu_scheduling ? 1 : 0) << "; "
                      << (knobs.use_physical ? 1 : 0) << "\n";
     experiments_file.close();
     // Open the corresponding cache statistics CSV file
@@ -266,12 +266,12 @@ missing_instructions_t::write_csv_header()
 
         // Construct the output row with deltas
         std::stringstream ss;
-        ss << "Instruction number, Access Address, PC Address, L1D Miss, L1I Miss, LL "
-              "Miss, "
-              "Instr Type, "
-           << "Byte Count, Disassembly String, Current Instruction ID, Core, "
-           << "Thread Switch, Core Switch, L1 Data Hits, L1 Data Misses, L1 Data Ratio, "
-           << "L1 Inst Hits, L1 Inst Misses, L1 Inst Ratio, LL Hits, LL Misses, LL Ratio";
+        ss << "Instruction number; Access Address; PC Address; L1D Miss; L1I Miss; LL "
+              "Miss; "
+              "Instr Type; "
+           << "Byte Count; Disassembly String; Current Instruction ID; Core; "
+           << "Thread Switch; Core Switch; L1 Data Hits; L1 Data Misses; L1 Data Ratio; "
+           << "L1 Inst Hits; L1 Inst Misses; L1 Inst Ratio; LL Hits; LL Misses; LL Ratio";
 
         // Write the constructed string to the compressed file
         write_compressed_row(ss.str());
@@ -319,17 +319,18 @@ missing_instructions_t::write_compressed_row_with_delta(const cachesim_row &row)
 
         // Construct the output row with deltas
         std::stringstream ss;
-        ss << current_instruction_id << ", " << delta_access << ", " << delta_pc << ", "
-           << (row.get_l1d_miss() ? 1 : 0) << ", " << (row.get_l1i_miss() ? 1 : 0) << ", "
-           << (row.get_ll_miss() ? 1 : 0) << ", " << row.get_instr_type() << ", "
-           << static_cast<int>(row.get_byte_count()) << ", "
-           << "\"" << row.get_disassembly_string() << "\", "
-           << row.get_current_instruction_id() << ", " << row.get_core() << ", "
-           << (row.get_thread_switch() ? 1 : 0) << ", " << (row.get_core_switch() ? 1 : 0)
-           << ", " << row.get_l1_data_hits() << ", " << row.get_l1_data_misses() << ", "
-           << row.get_l1_data_ratio() << ", " << row.get_l1_inst_hits() << ", "
-           << row.get_l1_inst_misses() << ", " << row.get_l1_inst_ratio() << ", "
-           << row.get_ll_hits() << ", " << row.get_ll_misses() << ", "
+
+        ss << current_instruction_id << "; " << delta_access << "; " << delta_pc << "; "
+           << (row.get_l1d_miss() ? 1 : 0) << "; " << (row.get_l1i_miss() ? 1 : 0) << "; "
+           << (row.get_ll_miss() ? 1 : 0) << "; " << row.get_instr_type() << "; "
+           << static_cast<int>(row.get_byte_count()) << "; "
+            << row.get_disassembly_string() << "; "
+           << row.get_current_instruction_id() << "; " << row.get_core() << "; "
+           << (row.get_thread_switch() ? 1 : 0) << "; " << (row.get_core_switch() ? 1 : 0)
+           << "; " << row.get_l1_data_hits() << "; " << row.get_l1_data_misses() << "; "
+           << row.get_l1_data_ratio() << "; " << row.get_l1_inst_hits() << "; "
+           << row.get_l1_inst_misses() << "; " << row.get_l1_inst_ratio() << "; "
+           << row.get_ll_hits() << "; " << row.get_ll_misses() << "; "
            << row.get_ll_ratio();
 
         // Write the constructed string to the compressed file
