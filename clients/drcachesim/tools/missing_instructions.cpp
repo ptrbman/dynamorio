@@ -324,7 +324,7 @@ missing_instructions_t::write_compressed_row_with_delta(const cachesim_row &row)
            << (row.get_l1d_miss() ? 1 : 0) << "; " << (row.get_l1i_miss() ? 1 : 0) << "; "
            << (row.get_ll_miss() ? 1 : 0) << "; " << row.get_instr_type() << "; "
            << static_cast<int>(row.get_byte_count()) << "; "
-            << row.get_disassembly_string() << "; "
+           << "\"" << row.get_disassembly_string() <<"\""<< "; "
            << row.get_current_instruction_id() << "; " << row.get_core() << "; "
            << (row.get_thread_switch() ? 1 : 0) << "; " << (row.get_core_switch() ? 1 : 0)
            << "; " << row.get_l1_data_hits() << "; " << row.get_l1_data_misses() << "; "
