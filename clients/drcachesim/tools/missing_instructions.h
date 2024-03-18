@@ -44,6 +44,7 @@
 #include "../simulator/cache_simulator.h"
 #include "cachesim_row.h"
 #include "memref.h"
+#include <sqlite3.h>
 // #include "raw2trace.h"
 // #include "raw2trace_directory.h"
 
@@ -158,12 +159,9 @@ private:
     std::string cache_stats_filename;
     std::string experiments_filename = "experiments.csv";
     std::string csv_log_path = "";
-    gzFile gz_cache_file = nullptr; // Handle for compressed output
     addr_t last_pc_address = 0;
     addr_t last_access_address = 0;
-    std::string write_buffer; // Accumulates data to be written
-    const size_t buffer_threshold =
-        1024 * 1024 * 500; // 500 MB buffer size, adjust as needed
+    sqlite3 *db = nullptr;
 };
 
 } // namespace drmemtrace
