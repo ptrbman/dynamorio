@@ -252,9 +252,14 @@ missing_instructions_t::process_memref(const memref_t &memref)
         update_instruction_stats(core, thread_switch, core_switch, memref, *row);
         update_miss_stats(core, memref, *row);
         embed_address_deltas_into_row(*row);
+        if (!(row->get_instr_type() == "ifetch" && row->get_access_address_delta() == 0 &&
+              row->get_pc_address_delta() == 0)) {
+            buffer_row(*row);
+        }
         return true;
     } catch (const std::exception &ex) {
-        std::cerr << "Issue occurred during disassembly of trace: " << ex.what();
+        std::cerr << "Issue occurred during disassembly of trace: " << ex.what()
+                  << std::endl;
         return false;
     }
 }
@@ -326,7 +331,7 @@ missing_instructions_t::embed_address_deltas_into_row(cachesim_row &row)
         row.set_pc_address_delta(delta_pc);
 
     } catch (const std::exception &e) {
-        std::cerr << "Exception: " << e.what();
+        std::cerr << "Exception: " << e.what() << std::endl;
         throw;
     }
 }
@@ -401,12 +406,6 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
     row.set_ll_miss(unified_miss_ll);
 
     get_opcode(memref, row);
-
-    embed_address_deltas_into_row(row);
-    if (!(row.get_instr_type() == "ifetch" && row.get_access_address_delta() == 0 &&
-          row.get_pc_address_delta() == 0)) {
-        buffer_row(row);
-    }
 }
 
 void
@@ -590,9 +589,6 @@ missing_instructions_t::insert_row_into_database(const cachesim_row &row)
             throw std::runtime_error(error_msg);
         }
         // Reset the statement to reuse it for the next insert
-        if (row_buffer.size() % 100000 == 0) {
-            std::cout << "buffer at " << row_buffer.size() << std::endl;
-        }
         sqlite3_reset(stmt);
     } catch (const std::exception &e) {
         std::cerr << "Exception: " << e.what() << std::endl;
@@ -604,8 +600,11 @@ void
 missing_instructions_t::buffer_row(const cachesim_row &row)
 {
     row_buffer.push_back(row);
+
+    if (row_buffer.size() % 100000 == 0) {
+        std::cout << "buffer at " << row_buffer.size() << std::endl;
+    }
     if (row_buffer.size() >= 1000000) { // Check if we've reached the buffer limit
-        std::cout << "Flushing buffer!" << std::endl;
         flush_buffer_to_database();
     }
 }
@@ -613,12 +612,19 @@ missing_instructions_t::buffer_row(const cachesim_row &row)
 void
 missing_instructions_t::flush_buffer_to_database()
 {
-    begin_transaction(); // Start the transaction
-    for (auto &row : row_buffer) {
-        insert_row_into_database(
-            row); // Insert each row. Ensure this does NOT finalize the statement.
+    std::cout << "Flushing buffer!" << std::endl;
+
+    try {
+        begin_transaction(); // Start the transaction
+        for (auto &row : row_buffer) {
+            insert_row_into_database(
+                row); // Insert each row. This does NOT finalize the statement.
+        }
+        end_transaction(); // Commit the transaction
+        std::cout << "Clearing buffer..." << std::endl;
+    } catch (const std::exception &e) {
+        std::cerr << "Exception occurred during flushing: " << e.what() << std::endl;
     }
-    end_transaction();  // Commit the transaction
     row_buffer.clear(); // Clear the buffer for the next batch
 }
 
