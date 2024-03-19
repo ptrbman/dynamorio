@@ -4,17 +4,28 @@ namespace dynamorio {
 namespace drmemtrace {
 // Setters
 void
-cachesim_row::set_access_address(const std::string &value)
+cachesim_row::set_access_address(const addr_t value)
 {
     access_address = value;
 }
 void
-cachesim_row::set_pc_address(const std::string &value)
+cachesim_row::set_pc_address(const addr_t value)
 {
     pc_address = value;
 }
-void
 
+void
+cachesim_row::set_access_address_delta(int value)
+{
+    access_address_delta = value;
+}
+
+void
+cachesim_row::set_pc_address_delta(int value)
+{
+    pc_address_delta = value;
+}
+void
 cachesim_row::set_l1d_miss(bool value)
 {
     l1d_miss = value;
@@ -52,7 +63,7 @@ cachesim_row::set_current_instruction_id(int value)
     current_instruction_id = value;
 }
 void
-cachesim_row::set_core(int value)
+cachesim_row::set_core(uint8_t value)
 {
     core = value;
 }
@@ -112,15 +123,25 @@ cachesim_row::set_ll_ratio(float value)
     ll_ratio = value;
 }
 
-std::string
+addr_t
 cachesim_row::get_access_address() const
 {
     return access_address;
 }
-std::string
+addr_t
 cachesim_row::get_pc_address() const
 {
     return pc_address;
+}
+int
+cachesim_row::get_pc_address_delta() const
+{
+    return pc_address_delta;
+}
+int
+cachesim_row::get_access_address_delta() const
+{
+    return access_address_delta;
 }
 bool
 cachesim_row::get_l1d_miss() const
@@ -157,7 +178,7 @@ cachesim_row::get_current_instruction_id() const
 {
     return current_instruction_id;
 }
-int
+uint8_t
 cachesim_row::get_core() const
 {
     return core;

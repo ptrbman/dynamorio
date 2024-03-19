@@ -52,6 +52,7 @@
 #include <ctime>
 #include <zlib.h>
 #include <sys/stat.h>
+#include <sqlite3.h>
 
 namespace dynamorio {
 namespace drmemtrace {
@@ -216,10 +217,11 @@ missing_instructions_t::create_experiment_insert_statement(
                      << (knobs.use_physical ? 1 : 0) << "\n";
     experiments_file.close();
     // Open the corresponding cache statistics CSV file
-    cache_stats_filename = csv_log_path + "cache_stats_" + experiment_id + ".csv";
-    std::cerr << "Printing cache stats file to " << cache_stats_filename << "\n";
+    cache_database_filename = csv_log_path + "cache_stats_" + experiment_id + ".db";
+    std::cerr << "Printing cache stats database to " << cache_database_filename << "\n";
 
-    write_csv_header();
+    open_database(cache_database_filename);
+    create_table();
 }
 
 bool
@@ -249,7 +251,7 @@ missing_instructions_t::process_memref(const memref_t &memref)
 
         update_instruction_stats(core, thread_switch, core_switch, memref, *row);
         update_miss_stats(core, memref, *row);
-        write_compressed_row_with_delta(*row);
+        embed_address_deltas_into_row(*row);
         return true;
     } catch (const std::exception &ex) {
         std::cerr << "Issue occurred during disassembly of trace: " << ex.what();
@@ -257,43 +259,44 @@ missing_instructions_t::process_memref(const memref_t &memref)
     }
 }
 
+// void
+// missing_instructions_t::write_csv_header()
+// {
+//     try {
+//         if (!gz_cache_file)
+//             open_compressed_output();
+
+//         // Construct the output row with deltas
+//         std::stringstream ss;
+//         ss << "Instruction number; Access Address; PC Address; L1D Miss; L1I Miss; LL "
+//               "Miss; "
+//               "Instr Type; "
+//            << "Byte Count; Disassembly String; Current Instruction ID; Core; "
+//            << "Thread Switch; Core Switch; L1 Data Hits; L1 Data Misses; L1 Data Ratio;
+//            "
+//            << "L1 Inst Hits; L1 Inst Misses; L1 Inst Ratio; LL Hits; LL Misses; LL
+//            Ratio";
+
+//         // Write the constructed string to the compressed file
+//         write_compressed_row(ss.str());
+//     } catch (const std::exception &e) {
+//         std::cerr << "Exception: " << e.what();
+//         throw;
+//     }
+// }
 void
-missing_instructions_t::write_csv_header()
+missing_instructions_t::embed_address_deltas_into_row(cachesim_row &row)
 {
     try {
-        if (!gz_cache_file)
-            open_compressed_output();
 
-        // Construct the output row with deltas
-        std::stringstream ss;
-        ss << "Instruction number; Access Address; PC Address; L1D Miss; L1I Miss; LL "
-              "Miss; "
-              "Instr Type; "
-           << "Byte Count; Disassembly String; Current Instruction ID; Core; "
-           << "Thread Switch; Core Switch; L1 Data Hits; L1 Data Misses; L1 Data Ratio; "
-           << "L1 Inst Hits; L1 Inst Misses; L1 Inst Ratio; LL Hits; LL Misses; LL Ratio";
-
-        // Write the constructed string to the compressed file
-        write_compressed_row(ss.str());
-    } catch (const std::exception &e) {
-        std::cerr << "Exception: " << e.what();
-        throw;
-    }
-}
-void
-missing_instructions_t::write_compressed_row_with_delta(const cachesim_row &row)
-{
-    try {
-        if (!gz_cache_file)
-            open_compressed_output();
         // Reset last addresses on thread switch
         if (row.get_thread_switch()) {
             last_pc_address = 0;
             last_access_address = 0;
         }
         // Convert addresses from string to numerical value for delta calculation
-        addr_t current_pc = std::stoull(row.get_pc_address(), nullptr, 16);
-        addr_t current_access = std::stoull(row.get_access_address(), nullptr, 16);
+        addr_t current_pc = row.get_pc_address();
+        addr_t current_access = row.get_access_address();
 
         // Calculate deltas with underflow check
         int64_t delta_pc =
@@ -318,23 +321,10 @@ missing_instructions_t::write_compressed_row_with_delta(const cachesim_row &row)
         last_access_address = current_access;
 
         // Construct the output row with deltas
-        std::stringstream ss;
 
-        ss << current_instruction_id << "; " << delta_access << "; " << delta_pc << "; "
-           << (row.get_l1d_miss() ? 1 : 0) << "; " << (row.get_l1i_miss() ? 1 : 0) << "; "
-           << (row.get_ll_miss() ? 1 : 0) << "; " << row.get_instr_type() << "; "
-           << static_cast<int>(row.get_byte_count()) << "; "
-           << "\"" << row.get_disassembly_string() <<"\""<< "; "
-           << row.get_current_instruction_id() << "; " << row.get_core() << "; "
-           << (row.get_thread_switch() ? 1 : 0) << "; " << (row.get_core_switch() ? 1 : 0)
-           << "; " << row.get_l1_data_hits() << "; " << row.get_l1_data_misses() << "; "
-           << row.get_l1_data_ratio() << "; " << row.get_l1_inst_hits() << "; "
-           << row.get_l1_inst_misses() << "; " << row.get_l1_inst_ratio() << "; "
-           << row.get_ll_hits() << "; " << row.get_ll_misses() << "; "
-           << row.get_ll_ratio();
+        row.set_access_address_delta(delta_access);
+        row.set_pc_address_delta(delta_pc);
 
-        // Write the constructed string to the compressed file
-        write_compressed_row(ss.str());
     } catch (const std::exception &e) {
         std::cerr << "Exception: " << e.what();
         throw;
@@ -404,24 +394,19 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
         addr = memref.data.addr;
     }
 
-    std::stringstream ss;
-    ss << std::setfill('0') << std::setw(16) << std::hex << addr; // Pad to 16 characters
-    std::string address_hex = ss.str();
-    ss.str("");
-    ss.clear();
-
-    ss << std::setfill('0') << std::setw(16) << std::hex << pc; // Pad to 16 characters
-    std::string pc_hex = ss.str();
-
-    row.set_pc_address(pc_hex);
-    row.set_access_address(address_hex);
+    row.set_pc_address(pc);
+    row.set_access_address(addr);
     row.set_l1d_miss(data_miss_l1);
     row.set_l1i_miss(inst_miss_l1);
     row.set_ll_miss(unified_miss_ll);
 
     get_opcode(memref, row);
 
-    write_compressed_row_with_delta(row);
+    embed_address_deltas_into_row(row);
+    if (!(row.get_instr_type() == "ifetch" && row.get_access_address_delta() == 0 &&
+          row.get_pc_address_delta() == 0)) {
+        buffer_row(row);
+    }
 }
 
 void
@@ -472,55 +457,192 @@ missing_instructions_t::print_results()
     return true;
 }
 
-// Function to get the size of a file
-long
-missing_instructions_t::getFileSize(const std::string &fileName)
-{
-    struct stat stat_buf;
-    int rc = stat(fileName.c_str(), &stat_buf);
-    return rc == 0 ? stat_buf.st_size : -1;
-}
-
 void
-missing_instructions_t::open_compressed_output()
+missing_instructions_t::begin_transaction()
 {
-    std::string compressed_filename = cache_stats_filename + ".gz";
-    gz_cache_file = gzopen(compressed_filename.c_str(), "wb");
-    if (!gz_cache_file) {
-        throw std::runtime_error("Failed to open compressed output file");
+    char *errmsg;
+    int rc = sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        std::cerr << "SQL error beginning transaction: " << errmsg;
+        sqlite3_free(errmsg);
+        // Handle error appropriately...
     }
 }
 
 void
-missing_instructions_t::write_compressed_row(const std::string &row)
+missing_instructions_t::open_database(const std::string db_filename)
 {
-    // Append the new row to the buffer
-    write_buffer += row + "\n"; // Ensure newline is included
+    int rc = sqlite3_open(db_filename.c_str(), &db);
 
-    // Check if buffer exceeds threshold and needs flushing
-    if (write_buffer.size() >= buffer_threshold) {
-        flush_buffer();
+    if (rc != SQLITE_OK) {
+        std::cerr << "Cannot open database: " << sqlite3_errmsg(db);
+        sqlite3_close(db);
+        throw std::runtime_error("Failed to open database");
     }
 }
 
 void
-missing_instructions_t::flush_buffer()
+missing_instructions_t::create_table()
 {
-    if (!write_buffer.empty()) {
-        // Write buffer to compressed file
-        gzwrite(gz_cache_file, write_buffer.data(), write_buffer.size());
-        write_buffer.clear(); // Reset buffer after writing
+    const char *sql_create_table = "CREATE TABLE IF NOT EXISTS cache_stats ("
+                                   "instruction_number INTEGER PRIMARY KEY, "
+                                   "access_address_delta INTEGER, "
+                                   "pc_address_delta INTEGER, "
+                                   "l1d_miss INTEGER, "
+                                   "l1i_miss INTEGER, "
+                                   "ll_miss INTEGER, "
+                                   "instr_type TEXT, "
+                                   "byte_count INTEGER, "
+                                   "disassembly_string TEXT, "
+                                   "current_instruction_id INTEGER, "
+                                   "core INTEGER, "
+                                   "thread_switch INTEGER, "
+                                   "core_switch INTEGER, "
+                                   "l1_data_hits INTEGER, "
+                                   "l1_data_misses INTEGER, "
+                                   "l1_data_ratio REAL, "
+                                   "l1_inst_hits INTEGER, "
+                                   "l1_inst_misses INTEGER, "
+                                   "l1_inst_ratio REAL, "
+                                   "ll_hits INTEGER, "
+                                   "ll_misses INTEGER, "
+                                   "ll_ratio REAL);";
+
+    char *errmsg;
+    int rc = sqlite3_exec(db, sql_create_table, 0, 0, &errmsg);
+    if (rc != SQLITE_OK) {
+        std::cerr << "SQL error: " << errmsg;
+        sqlite3_free(errmsg);
+        throw std::runtime_error("Failed to create table");
     }
 }
 
 void
-missing_instructions_t::close_compressed_output()
+missing_instructions_t::insert_row_into_database(const cachesim_row &row)
 {
-    flush_buffer(); // Flush any remaining data in the buffer
-    if (gz_cache_file) {
-        gzclose(gz_cache_file); // Close the gzFile resource
-        gz_cache_file = nullptr;
+    try {
+        const char *sql_insert = "INSERT INTO cache_stats ("
+                                 "instruction_number, "
+                                 "access_address_delta, "
+                                 "pc_address_delta, "
+                                 "l1d_miss, "
+                                 "l1i_miss, "
+                                 "ll_miss, "
+                                 "instr_type, "
+                                 "byte_count, "
+                                 "disassembly_string, "
+                                 "current_instruction_id, "
+                                 "core, "
+                                 "thread_switch, "
+                                 "core_switch, "
+                                 "l1_data_hits, "
+                                 "l1_data_misses, "
+                                 "l1_data_ratio, "
+                                 "l1_inst_hits, "
+                                 "l1_inst_misses, "
+                                 "l1_inst_ratio, "
+                                 "ll_hits, "
+                                 "ll_misses, "
+                                 "ll_ratio"
+                                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                                 "?, ?, ?, ?, ?, ?, ?);";
+        sqlite3_stmt *stmt;
+        int rc = sqlite3_prepare_v2(db, sql_insert, -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            std::stringstream ss;
+            ss << "Cannot prepare insert statement: " << sqlite3_errmsg(db);
+            std::string error_msg = ss.str();
+            std::cerr << error_msg << std::endl;
+            throw std::runtime_error(error_msg);
+        }
+
+        // Bind values from 'row' to the prepared SQL statement
+        sqlite3_bind_int(stmt, 1, row.get_current_instruction_id());
+        sqlite3_bind_int(stmt, 2, row.get_access_address_delta());
+        sqlite3_bind_int(stmt, 3, row.get_pc_address_delta());
+        sqlite3_bind_int(stmt, 4, row.get_l1d_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 5, row.get_l1i_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 6, row.get_ll_miss() ? 1 : 0);
+        sqlite3_bind_text(stmt, 7, row.get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 8, row.get_byte_count());
+        sqlite3_bind_text(stmt, 9, row.get_disassembly_string().c_str(), -1,
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 10, row.get_current_instruction_id());
+        sqlite3_bind_int(stmt, 11, row.get_core());
+        sqlite3_bind_int(stmt, 12, row.get_thread_switch() ? 1 : 0);
+        sqlite3_bind_int(stmt, 13, row.get_core_switch() ? 1 : 0);
+        sqlite3_bind_int(stmt, 14, row.get_l1_data_hits());
+        sqlite3_bind_int(stmt, 15, row.get_l1_data_misses());
+        sqlite3_bind_double(stmt, 16, row.get_l1_data_ratio());
+        sqlite3_bind_int(stmt, 17, row.get_l1_inst_hits());
+        sqlite3_bind_int(stmt, 18, row.get_l1_inst_misses());
+        sqlite3_bind_double(stmt, 19, row.get_l1_inst_ratio());
+        sqlite3_bind_int(stmt, 20, row.get_ll_hits());
+        sqlite3_bind_int(stmt, 21, row.get_ll_misses());
+        sqlite3_bind_double(stmt, 22, row.get_ll_ratio());
+
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_DONE) {
+            std::stringstream ss;
+            ss << "Insertion failed: " << sqlite3_errmsg(db);
+            std::string error_msg = ss.str();
+            std::cerr << error_msg << std::endl;
+            throw std::runtime_error(error_msg);
+        }
+        // Reset the statement to reuse it for the next insert
+        if (row_buffer.size() % 100000 == 0) {
+            std::cout << "buffer at " << row_buffer.size() << std::endl;
+        }
+        sqlite3_reset(stmt);
+    } catch (const std::exception &e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw e;
     }
+}
+
+void
+missing_instructions_t::buffer_row(const cachesim_row &row)
+{
+    row_buffer.push_back(row);
+    if (row_buffer.size() >= 1000000) { // Check if we've reached the buffer limit
+        std::cout << "Flushing buffer!" << std::endl;
+        flush_buffer_to_database();
+    }
+}
+
+void
+missing_instructions_t::flush_buffer_to_database()
+{
+    begin_transaction(); // Start the transaction
+    for (auto &row : row_buffer) {
+        insert_row_into_database(
+            row); // Insert each row. Ensure this does NOT finalize the statement.
+    }
+    end_transaction();  // Commit the transaction
+    row_buffer.clear(); // Clear the buffer for the next batch
+}
+
+void
+missing_instructions_t::end_transaction()
+{
+    char *errmsg;
+    int rc = sqlite3_exec(db, "END TRANSACTION;", NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        std::cerr << "SQL error ending transaction: " << errmsg;
+        sqlite3_free(errmsg);
+        // Handle error appropriately...
+    }
+}
+
+void
+missing_instructions_t::close_database()
+{
+    // After all rows have been buffered and you're done processing
+    if (!row_buffer.empty()) {
+        flush_buffer_to_database();
+    }
+    end_transaction(); // Clean up the prepared statement
+    sqlite3_close(db);
 }
 
 } // namespace drmemtrace

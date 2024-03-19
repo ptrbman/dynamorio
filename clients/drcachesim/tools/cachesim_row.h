@@ -2,22 +2,25 @@
 #    define _CACHE_SIMULATOR_H_ 1
 
 #    include <iostream>
+#    include "memref.h"
 namespace dynamorio {
 namespace drmemtrace {
 /// @brief Class contains data used for inserting new execution row into a DB.
 class cachesim_row {
 private:
     /* data */
-    std::string access_address;
-    std::string pc_address;
+    addr_t access_address;
+    addr_t pc_address;
+    int access_address_delta;
+    int pc_address_delta;
     bool l1d_miss;
     bool l1i_miss;
     bool ll_miss;
     std::string instr_type = "";
-    int byte_count;
+    uint8_t byte_count;
     std::string disassembly_string;
     int current_instruction_id;
-    int core;
+    uint8_t core;
     bool thread_switch;
     bool core_switch;
     int l1_data_hits;
@@ -36,9 +39,13 @@ public:
 
     // Setters declarations
     void
-    set_access_address(const std::string &value);
+    set_access_address(const addr_t value);
     void
-    set_pc_address(const std::string &value);
+    set_pc_address(const addr_t value);
+    void
+    set_access_address_delta(int value);
+    void
+    set_pc_address_delta(int value);
     void
     set_l1d_miss(bool value);
     void
@@ -54,7 +61,7 @@ public:
     void
     set_current_instruction_id(int value);
     void
-    set_core(int value);
+    set_core(uint8_t value);
     void
     set_thread_switch(bool value);
     void
@@ -79,10 +86,14 @@ public:
     set_ll_ratio(float value);
 
     // Getters declarations
-    std::string
+    addr_t
     get_access_address() const;
-    std::string
+    addr_t
     get_pc_address() const;
+    int
+    get_access_address_delta() const;
+    int
+    get_pc_address_delta() const;
     bool
     get_l1d_miss() const;
     bool
@@ -97,7 +108,7 @@ public:
     get_disassembly_string() const;
     int
     get_current_instruction_id() const;
-    int
+    uint8_t
     get_core() const;
     bool
     get_thread_switch() const;

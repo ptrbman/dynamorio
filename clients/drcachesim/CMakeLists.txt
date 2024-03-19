@@ -372,7 +372,10 @@ install_client_nonDR_header(drmemtrace scheduler/speculator.h)
 add_library(test_helpers STATIC tests/test_helpers.cpp)
 
 # # Manually set the include directory for MySQL Connector/C++
-# target_link_libraries(drmemtrace_missing_instructions mysqlcppconn)
+find_package (SQLite3 REQUIRED)
+include_directories(${SQLite3_INCLUDE_DIRS})
+
+target_link_libraries(drmemtrace_missing_instructions SQLite::SQLite3)
 # Manually set the include directory for cachesimrow
 # Add your cachesim_row.cpp source file
 target_sources(drmemtrace_missing_instructions PRIVATE tools/cachesim_row.cpp)

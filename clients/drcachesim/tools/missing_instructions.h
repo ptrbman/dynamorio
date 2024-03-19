@@ -45,9 +45,6 @@
 #include "cachesim_row.h"
 #include "memref.h"
 #include <sqlite3.h>
-// #include "raw2trace.h"
-// #include "raw2trace_directory.h"
-
 namespace dynamorio {
 namespace drmemtrace {
 class missing_instructions_t : public cache_simulator_t {
@@ -62,11 +59,7 @@ public:
     // Destructor to ensure the file is closed
     ~missing_instructions_t()
     {
-        flush_buffer(); // Ensure buffer is flushed upon destruction
-        if (gz_cache_file) {
-            gzclose(gz_cache_file); // Close the gzFile resource
-            gz_cache_file = nullptr;
-        }
+        close_database();
     }
     missing_instructions_t(const cache_simulator_knobs_t &knobs);
 
@@ -135,33 +128,44 @@ private:
     update_instruction_stats(int core, bool thread_switch, bool core_switch,
                              const memref_t &memref, cachesim_row &row);
 
-    void
-    write_csv_header();
+    // void
+    // write_csv_header();
     void
     update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
     insert_new_row(const cachesim_row &row);
     void
-    write_compressed_row_with_delta(const cachesim_row &row);
+    embed_address_deltas_into_row(cachesim_row &row);
 
     long
     getFileSize(const std::string &fileName);
+    // void
+    // splitAndCompress(const std::string &fileName, int max_size);
+    // void
+    // open_compressed_output();
     void
-    splitAndCompress(const std::string &fileName, int max_size);
+    open_database(const std::string db_filename);
     void
-    open_compressed_output();
+    create_table();
     void
-    write_compressed_row(const std::string &row);
+    insert_row_into_database(const cachesim_row &row);
     void
-    close_compressed_output();
+    begin_transaction();
     void
-    flush_buffer();
-    std::string cache_stats_filename;
+    buffer_row(const cachesim_row &row);
+    void
+    flush_buffer_to_database();
+    void
+    end_transaction();
+    void
+    close_database();
+    std::string cache_database_filename;
     std::string experiments_filename = "experiments.csv";
     std::string csv_log_path = "";
     addr_t last_pc_address = 0;
     addr_t last_access_address = 0;
     sqlite3 *db = nullptr;
+    std::vector<cachesim_row> row_buffer;
 };
 
 } // namespace drmemtrace
