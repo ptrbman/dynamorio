@@ -231,7 +231,7 @@ missing_instructions_t::process_memref(const memref_t &memref)
             std::cerr << "Doing " << current_instruction_id << std::endl;
         std::unique_ptr<cachesim_row> row(new cachesim_row());
 
-        update_instruction_stats(core, thread_switch, core_switch, memref, *row);
+        update_instruction_stats(core, thread_switch, core_switch, *row);
         update_miss_stats(core, memref, *row);
         embed_address_deltas_into_row(*row);
         if (!(row->get_instr_type() == "ifetch" && row->get_access_address_delta() == 0 &&
