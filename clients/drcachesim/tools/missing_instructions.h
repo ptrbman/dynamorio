@@ -56,12 +56,12 @@ public:
 
     void
     get_opcode(const memref_t &memref, cachesim_row &row);
-    // Destructor to ensure the file is closed
-    ~missing_instructions_t()
+    // Destructor to ensure the database is closed
+    ~missing_instructions_t() final
     {
         close_database();
     }
-    missing_instructions_t(const cache_simulator_knobs_t &knobs);
+    explicit missing_instructions_t(const cache_simulator_knobs_t &knobs);
 
     bool
     process_memref(const memref_t &memref) override;
@@ -118,37 +118,25 @@ protected:
 
 private:
     int current_instruction_id = 0;
-    uintptr_t curr_core_id;
+    uintptr_t curr_core_id = 0;
     memref_tid_t curr_thread_id;
-    int
-    insert_new_experiment(const cache_simulator_knobs_t &knobs);
+
     void
     create_experiment_insert_statement(const cache_simulator_knobs_t &knobs);
     void
     update_instruction_stats(int core, bool thread_switch, bool core_switch,
                              const memref_t &memref, cachesim_row &row);
 
-    // void
-    // write_csv_header();
     void
     update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
-    insert_new_row(const cachesim_row &row);
-    void
     embed_address_deltas_into_row(cachesim_row &row);
-
-    long
-    getFileSize(const std::string &fileName);
-    // void
-    // splitAndCompress(const std::string &fileName, int max_size);
-    // void
-    // open_compressed_output();
     void
     open_database(const std::string db_filename);
     void
     create_table();
     void
-    insert_row_into_database(const cachesim_row &row);
+    insert_row_into_database(const cachesim_row &row, sqlite3_stmt *stmt);
     void
     begin_transaction();
     void

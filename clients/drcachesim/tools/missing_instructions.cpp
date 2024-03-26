@@ -103,30 +103,16 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
         case TRACE_TYPE_HARDWARE_PREFETCH: name = "pref-HW"; break;
         }
 
-        row.set_byte_count(memref.data.size);
+        row.set_byte_count(static_cast<uint8_t>(memref.data.size));
         row.set_instr_type(name);
         return;
     }
 
-    // TODO: see what's to be done here (based on the newest drio code) maybe
     app_pc decode_pc;
-    const app_pc orig_pc = (app_pc)memref.instr.addr;
+    auto orig_pc = (app_pc)memref.instr.addr;
     // if (TESTANY(OFFLINE_FILE_TYPE_ENCODINGS, filetype_)) {
     // The trace has instruction encodings inside it.
     decode_pc = const_cast<app_pc>(memref.instr.encoding);
-    // if (memref.instr.encoding_is_new) {
-    //     // The code may have changed: invalidate the cache.
-    //     disasm_cache_.erase(orig_pc);
-    // } else {
-    //     // Legacy trace support where we need the binaries.
-    //     decode_pc = module_mapper_->find_mapped_trace_address(orig_pc);
-    //     if (!module_mapper_->get_last_error().empty()) {
-    //         error_string_ = "Failed to find mapped address for " +
-    //             to_hex_string(memref.instr.addr) + ": " +
-    //             module_mapper_->get_last_error();
-    //         return false;
-    //     }
-    // }
 
     std::string disasm;
     // auto cached_disasm = disasm_cache_.find(orig_pc);
@@ -145,9 +131,7 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
         throw std::invalid_argument(error_string_);
     }
     disasm = buf;
-    // disasm_cache_.insert({ orig_pc, disasm });
-    //   }
-    //   // Put our prefix on raw byte spillover, and skip the other columns.
+
     auto newline = disasm.find('\n');
     if (newline != std::string::npos && newline < disasm.size() - 1) {
         std::stringstream prefix;
@@ -160,23 +144,21 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
 
     row.set_instr_type("ifetch");
     row.set_disassembly_string(disasm);
-    row.set_byte_count(memref.data.size);
+    row.set_byte_count(static_cast<uint8_t>(memref.data.size));
 }
 
 analysis_tool_t *
 missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 {
-    return new missing_instructions_t(knobs);
+    return std::make_unique(missing_instructions_t(knobs)) ;
 }
 
 missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &knobs)
     : cache_simulator_t(knobs)
     , csv_log_path(knobs_.cache_trace_log_path)
 {
-
     std::cout << "Path for logging: " << csv_log_path << "\n";
     create_experiment_insert_statement(knobs_);
-    curr_core_id = 0;
 }
 
 void
@@ -264,31 +246,7 @@ missing_instructions_t::process_memref(const memref_t &memref)
     }
 }
 
-// void
-// missing_instructions_t::write_csv_header()
-// {
-//     try {
-//         if (!gz_cache_file)
-//             open_compressed_output();
 
-//         // Construct the output row with deltas
-//         std::stringstream ss;
-//         ss << "Instruction number; Access Address; PC Address; L1D Miss; L1I Miss; LL "
-//               "Miss; "
-//               "Instr Type; "
-//            << "Byte Count; Disassembly String; Current Instruction ID; Core; "
-//            << "Thread Switch; Core Switch; L1 Data Hits; L1 Data Misses; L1 Data Ratio;
-//            "
-//            << "L1 Inst Hits; L1 Inst Misses; L1 Inst Ratio; LL Hits; LL Misses; LL
-//            Ratio";
-
-//         // Write the constructed string to the compressed file
-//         write_compressed_row(ss.str());
-//     } catch (const std::exception &e) {
-//         std::cerr << "Exception: " << e.what();
-//         throw;
-//     }
-// }
 void
 missing_instructions_t::embed_address_deltas_into_row(cachesim_row &row)
 {
@@ -452,7 +410,7 @@ bool
 missing_instructions_t::print_results()
 {
     std::cerr << TOOL_NAME << " results:\n";
-    cache_simulator_t::print_results();
+    // cache_simulator_t::print_results();
     return true;
 }
 
@@ -463,9 +421,9 @@ missing_instructions_t::begin_transaction()
     int rc = sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, &errmsg);
     if (rc != SQLITE_OK) {
         std::cerr << "SQL error beginning transaction: " << errmsg;
-        sqlite3_free(errmsg);
         // Handle error appropriately...
     }
+    sqlite3_free(errmsg);
 }
 
 void
@@ -513,13 +471,72 @@ missing_instructions_t::create_table()
         std::cerr << "SQL error: " << errmsg;
         sqlite3_free(errmsg);
         throw std::runtime_error("Failed to create table");
+    } else {
+        sqlite3_free(errmsg);
     }
 }
 
 void
-missing_instructions_t::insert_row_into_database(const cachesim_row &row)
+missing_instructions_t::insert_row_into_database(const cachesim_row &row,
+                                                 sqlite3_stmt *stmt)
 {
     try {
+
+        // Bind values from 'row' to the prepared SQL statement
+        sqlite3_bind_int(stmt, 1, row.get_current_instruction_id());
+        sqlite3_bind_int(stmt, 2, row.get_access_address_delta());
+        sqlite3_bind_int(stmt, 3, row.get_pc_address_delta());
+        sqlite3_bind_int(stmt, 4, row.get_l1d_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 5, row.get_l1i_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 6, row.get_ll_miss() ? 1 : 0);
+        sqlite3_bind_text(stmt, 7, row.get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 8, row.get_byte_count());
+        sqlite3_bind_text(stmt, 9, row.get_disassembly_string().c_str(), -1,
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 10, row.get_current_instruction_id());
+        sqlite3_bind_int(stmt, 11, row.get_core());
+        sqlite3_bind_int(stmt, 12, row.get_thread_switch() ? 1 : 0);
+        sqlite3_bind_int(stmt, 13, row.get_core_switch() ? 1 : 0);
+        sqlite3_bind_int(stmt, 14, row.get_l1_data_hits());
+        sqlite3_bind_int(stmt, 15, row.get_l1_data_misses());
+        sqlite3_bind_double(stmt, 16, row.get_l1_data_ratio());
+        sqlite3_bind_int(stmt, 17, row.get_l1_inst_hits());
+        sqlite3_bind_int(stmt, 18, row.get_l1_inst_misses());
+        sqlite3_bind_double(stmt, 19, row.get_l1_inst_ratio());
+        sqlite3_bind_int(stmt, 20, row.get_ll_hits());
+        sqlite3_bind_int(stmt, 21, row.get_ll_misses());
+        sqlite3_bind_double(stmt, 22, row.get_ll_ratio());
+
+    } catch (const std::exception &e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw e;
+    }
+}
+
+void
+missing_instructions_t::buffer_row(const cachesim_row &row)
+{
+    row_buffer.push_back(row);
+
+    if (row_buffer.size() % 100000 == 0) {
+        std::cout << "buffer at " << row_buffer.size() << std::endl;
+        std::cout << "buffer size : " << sizeof(row_buffer[0]) * row_buffer.size()
+                  << std::endl;
+    }
+    if (row_buffer.size() >= 10000000) { // Check if we've reached the buffer limit
+        flush_buffer_to_database();
+    }
+}
+
+void
+missing_instructions_t::flush_buffer_to_database()
+{
+    std::cout << "Flushing buffer!" << std::endl;
+
+    try {
+        begin_transaction(); // Start the transaction
+
+        // Preparing the SQL statement once, instead of re-preparing it for every row
         const char *sql_insert = "INSERT INTO cache_stats ("
                                  "instruction_number, "
                                  "access_address_delta, "
@@ -555,70 +572,19 @@ missing_instructions_t::insert_row_into_database(const cachesim_row &row)
             throw std::runtime_error(error_msg);
         }
 
-        // Bind values from 'row' to the prepared SQL statement
-        sqlite3_bind_int(stmt, 1, row.get_current_instruction_id());
-        sqlite3_bind_int(stmt, 2, row.get_access_address_delta());
-        sqlite3_bind_int(stmt, 3, row.get_pc_address_delta());
-        sqlite3_bind_int(stmt, 4, row.get_l1d_miss() ? 1 : 0);
-        sqlite3_bind_int(stmt, 5, row.get_l1i_miss() ? 1 : 0);
-        sqlite3_bind_int(stmt, 6, row.get_ll_miss() ? 1 : 0);
-        sqlite3_bind_text(stmt, 7, row.get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 8, row.get_byte_count());
-        sqlite3_bind_text(stmt, 9, row.get_disassembly_string().c_str(), -1,
-                          SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 10, row.get_current_instruction_id());
-        sqlite3_bind_int(stmt, 11, row.get_core());
-        sqlite3_bind_int(stmt, 12, row.get_thread_switch() ? 1 : 0);
-        sqlite3_bind_int(stmt, 13, row.get_core_switch() ? 1 : 0);
-        sqlite3_bind_int(stmt, 14, row.get_l1_data_hits());
-        sqlite3_bind_int(stmt, 15, row.get_l1_data_misses());
-        sqlite3_bind_double(stmt, 16, row.get_l1_data_ratio());
-        sqlite3_bind_int(stmt, 17, row.get_l1_inst_hits());
-        sqlite3_bind_int(stmt, 18, row.get_l1_inst_misses());
-        sqlite3_bind_double(stmt, 19, row.get_l1_inst_ratio());
-        sqlite3_bind_int(stmt, 20, row.get_ll_hits());
-        sqlite3_bind_int(stmt, 21, row.get_ll_misses());
-        sqlite3_bind_double(stmt, 22, row.get_ll_ratio());
-
-        rc = sqlite3_step(stmt);
-        if (rc != SQLITE_DONE) {
-            std::stringstream ss;
-            ss << "Insertion failed: " << sqlite3_errmsg(db);
-            std::string error_msg = ss.str();
-            std::cerr << error_msg << std::endl;
-            throw std::runtime_error(error_msg);
-        }
-        // Reset the statement to reuse it for the next insert
-        sqlite3_reset(stmt);
-    } catch (const std::exception &e) {
-        std::cerr << "Exception: " << e.what() << std::endl;
-        throw e;
-    }
-}
-
-void
-missing_instructions_t::buffer_row(const cachesim_row &row)
-{
-    row_buffer.push_back(row);
-
-    if (row_buffer.size() % 100000 == 0) {
-        std::cout << "buffer at " << row_buffer.size() << std::endl;
-    }
-    if (row_buffer.size() >= 1000000) { // Check if we've reached the buffer limit
-        flush_buffer_to_database();
-    }
-}
-
-void
-missing_instructions_t::flush_buffer_to_database()
-{
-    std::cout << "Flushing buffer!" << std::endl;
-
-    try {
-        begin_transaction(); // Start the transaction
         for (auto &row : row_buffer) {
             insert_row_into_database(
-                row); // Insert each row. This does NOT finalize the statement.
+                row, stmt); // Insert each row. This does NOT finalize the statement.
+            rc = sqlite3_step(stmt);
+            if (rc != SQLITE_DONE) {
+                std::stringstream ss;
+                ss << "Insertion failed: " << sqlite3_errmsg(db);
+                std::string error_msg = ss.str();
+                std::cerr << error_msg << std::endl;
+                throw std::runtime_error(error_msg);
+            }
+            // Reset the statement to reuse it for the next insert
+            sqlite3_reset(stmt);
         }
         end_transaction(); // Commit the transaction
         std::cout << "Clearing buffer..." << std::endl;
@@ -626,6 +592,8 @@ missing_instructions_t::flush_buffer_to_database()
         std::cerr << "Exception occurred during flushing: " << e.what() << std::endl;
     }
     row_buffer.clear(); // Clear the buffer for the next batch
+    row_buffer.shrink_to_fit();
+    std::vector<cachesim_row>().swap(row_buffer);
 }
 
 void
@@ -635,9 +603,9 @@ missing_instructions_t::end_transaction()
     int rc = sqlite3_exec(db, "END TRANSACTION;", NULL, NULL, &errmsg);
     if (rc != SQLITE_OK) {
         std::cerr << "SQL error ending transaction: " << errmsg;
-        sqlite3_free(errmsg);
         // Handle error appropriately...
     }
+    sqlite3_free(errmsg);
 }
 
 void
