@@ -156,7 +156,13 @@ missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &knobs)
     : cache_simulator_t(knobs)
     , csv_log_path(knobs_.cache_trace_log_path)
+    , max_buffer_size(knobs_.cachesim_row_buffer_size)
+    , max_trace_length(knobs_.max_trace_length)
 {
+    std::string format = knobs_.trace_form;
+    std::transform(format.begin(), format.end(), format.begin(), ::tolower);
+    use_expanded_trace_format = (format == "expanded");
+
     std::cout << "Path for logging: " << csv_log_path << "\n";
     create_experiment_insert_statement(knobs_);
 }
@@ -229,8 +235,11 @@ missing_instructions_t::process_memref(const memref_t &memref)
         }
         if (current_instruction_id % 100000 == 0)
             std::cerr << "Doing " << current_instruction_id << std::endl;
-        std::unique_ptr<cachesim_row> row(new cachesim_row());
-
+        std::unique_ptr<cachesim_row> row;
+        if (use_expanded_trace_format)
+            row = std::make_unique<expanded_cachesim_row>();
+        else
+            row = std::make_unique<cachesim_row>();
         update_instruction_stats(core, thread_switch, core_switch, *row);
         update_miss_stats(core, memref, *row);
         embed_address_deltas_into_row(*row);
@@ -365,11 +374,20 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
 
     get_opcode(memref, row);
 }
-
 void
 missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
                                                  bool core_switch,
                                                  cachesim_row &row) const
+{
+    row.set_current_instruction_id(current_instruction_id);
+    row.set_core(static_cast<uint8_t>(core));
+    row.set_thread_switch(thread_switch);
+    row.set_core_switch(core_switch);
+}
+void
+missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
+                                                 bool core_switch,
+                                                 expanded_cachesim_row &row) const
 {
     long int l1_data_hits = cache_simulator_t::get_cache_metric(
         metric_name_t::HITS, 0, core, cache_split_t::DATA);
@@ -440,6 +458,7 @@ missing_instructions_t::open_database(const std::string &db_filename)
 void
 missing_instructions_t::create_table()
 {
+    // TODO: here this needs to be dependent on use_expanded_form somehow cleverly
     const char *sql_create_table = "CREATE TABLE IF NOT EXISTS cache_stats ("
                                    "instruction_number INTEGER PRIMARY KEY, "
                                    "access_address_delta INTEGER, "
@@ -477,7 +496,7 @@ missing_instructions_t::create_table()
 
 void
 missing_instructions_t::insert_row_into_database(const cachesim_row &row,
-                                                 sqlite3_stmt *stmt)
+                                                 sqlite3_stmt *stmt) const
 {
     try {
 

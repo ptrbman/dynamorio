@@ -571,6 +571,9 @@ analyzer_multi_t::get_cache_simulator_knobs()
     knobs->cpu_scheduling = op_cpu_scheduling.get_value();
     knobs->use_physical = op_use_physical.get_value();
     knobs->cache_trace_log_path = op_cache_trace_log_path.get_value();
+    knobs->max_trace_length = op_max_trace_length.get_value();
+    knobs->cachesim_row_buffer_size = op_cachesim_row_buffer_size.get_value();
+    knobs->trace_form = op_trace_form.get_value();
     return knobs;
 }
 
