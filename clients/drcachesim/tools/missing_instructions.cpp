@@ -121,8 +121,8 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
     //   } else {
     // MAX_INSTR_DIS_SZ is set to 196 in core/ir/disassemble.h but is not
     // exported so we just use the same value here.
-    char buf[196];
-    byte *next_pc =
+    char buf[196]; // NOSONAR
+    const byte *next_pc =
         disassemble_to_buffer(dcontext_.dcontext, decode_pc, orig_pc, /*show_pc=*/false,
                               /*show_bytes=*/true, buf, BUFFER_SIZE_ELEMENTS(buf),
                               /*printed=*/nullptr);
@@ -150,7 +150,7 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
 analysis_tool_t *
 missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 {
-    return std::make_unique(missing_instructions_t(knobs)) ;
+    return new missing_instructions_t(knobs);
 }
 
 missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &knobs)
@@ -242,10 +242,9 @@ missing_instructions_t::process_memref(const memref_t &memref)
     } catch (const std::exception &ex) {
         std::cerr << "Issue occurred during disassembly of trace: " << ex.what()
                   << std::endl;
-        return false;
+        throw;
     }
 }
-
 
 void
 missing_instructions_t::embed_address_deltas_into_row(cachesim_row &row)
@@ -285,8 +284,8 @@ missing_instructions_t::embed_address_deltas_into_row(cachesim_row &row)
 
         // Construct the output row with deltas
 
-        row.set_access_address_delta(delta_access);
-        row.set_pc_address_delta(delta_pc);
+        row.set_access_address_delta(static_cast<int>(delta_access));
+        row.set_pc_address_delta(static_cast<int>(delta_pc));
 
     } catch (const std::exception &e) {
         std::cerr << "Exception: " << e.what() << std::endl;
@@ -298,25 +297,25 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
                                           cachesim_row &row)
 {
 
-    int data_misses_l1_pre = cache_simulator_t::get_cache_metric(
+    long int data_misses_l1_pre = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 0, core, cache_split_t::DATA);
-    int inst_misses_l1_pre = cache_simulator_t::get_cache_metric(
+    long int inst_misses_l1_pre = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 0, core, cache_split_t::INSTRUCTION);
-    int unified_misses_ll_pre = cache_simulator_t::get_cache_metric(
+    long int unified_misses_ll_pre = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 2, core, cache_split_t::DATA);
 
-    // bool cache_ret = cache_simulator_t::process_memref(memref);
     cache_simulator_t::process_memref(memref);
-    int data_misses_l1_post = cache_simulator_t::get_cache_metric(
+    long int data_misses_l1_post = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 0, core, cache_split_t::DATA);
-    int inst_misses_l1_post = cache_simulator_t::get_cache_metric(
+    long int inst_misses_l1_post = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 0, core, cache_split_t::INSTRUCTION);
-    int unified_misses_ll_post = cache_simulator_t::get_cache_metric(
+    long int unified_misses_ll_post = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 2, core, cache_split_t::DATA);
 
-    int data_misses_l1 = data_misses_l1_post - data_misses_l1_pre;
-    int inst_misses_l1 = inst_misses_l1_post - inst_misses_l1_pre;
-    int unified_misses_ll = unified_misses_ll_post - unified_misses_ll_pre;
+    auto data_misses_l1 = static_cast<int>(data_misses_l1_post - data_misses_l1_pre);
+    auto inst_misses_l1 = static_cast<int>(inst_misses_l1_post - inst_misses_l1_pre);
+    auto unified_misses_ll =
+        static_cast<int>(unified_misses_ll_post - unified_misses_ll_pre);
 
     bool data_miss_l1 = false;
     bool inst_miss_l1 = false;
@@ -345,7 +344,8 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
         throw std::runtime_error(error_message);
     }
 
-    addr_t pc, addr;
+    addr_t pc;
+    addr_t addr;
     if (type_is_instr(memref.data.type)) {
         pc = memref.instr.addr;
         addr = pc;
@@ -368,21 +368,21 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
 
 void
 missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
-                                                 bool core_switch, const memref_t &memref,
-                                                 cachesim_row &row)
+                                                 bool core_switch,
+                                                 cachesim_row &row) const
 {
-    int l1_data_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 0, core,
-                                                           cache_split_t::DATA);
-    int l1_inst_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 0, core,
-                                                           cache_split_t::INSTRUCTION);
-    int l1_data_misses = cache_simulator_t::get_cache_metric(metric_name_t::MISSES, 0,
-                                                             core, cache_split_t::DATA);
-    int l1_inst_misses = cache_simulator_t::get_cache_metric(
+    long int l1_data_hits = cache_simulator_t::get_cache_metric(
+        metric_name_t::HITS, 0, core, cache_split_t::DATA);
+    long int l1_inst_hits = cache_simulator_t::get_cache_metric(
+        metric_name_t::HITS, 0, core, cache_split_t::INSTRUCTION);
+    long int l1_data_misses = cache_simulator_t::get_cache_metric(
+        metric_name_t::MISSES, 0, core, cache_split_t::DATA);
+    long int l1_inst_misses = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 0, core, cache_split_t::INSTRUCTION);
-    int ll_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 2, core,
-                                                      cache_split_t::DATA);
-    int ll_misses = cache_simulator_t::get_cache_metric(metric_name_t::MISSES, 2, core,
-                                                        cache_split_t::DATA);
+    long int ll_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 2, core,
+                                                           cache_split_t::DATA);
+    long int ll_misses = cache_simulator_t::get_cache_metric(metric_name_t::MISSES, 2,
+                                                             core, cache_split_t::DATA);
 
     float l1_data_ratio = static_cast<float>(l1_data_misses) /
         static_cast<float>(l1_data_misses + l1_data_hits);
@@ -392,25 +392,24 @@ missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
         static_cast<float>(ll_misses) / static_cast<float>(ll_misses + ll_hits);
 
     row.set_current_instruction_id(current_instruction_id);
-    row.set_core(core);
+    row.set_core(static_cast<uint8_t>(core));
     row.set_thread_switch(thread_switch);
     row.set_core_switch(core_switch);
-    row.set_l1_data_misses(l1_data_misses);
-    row.set_l1_data_hits(l1_data_hits);
-    row.set_l1_inst_hits(l1_inst_hits);
-    row.set_l1_inst_misses(l1_inst_misses);
+    row.set_l1_data_misses(static_cast<int>(l1_data_misses));
+    row.set_l1_data_hits(static_cast<int>(l1_data_hits));
+    row.set_l1_inst_hits(static_cast<int>(l1_inst_hits));
+    row.set_l1_inst_misses(static_cast<int>(l1_inst_misses));
     row.set_l1_data_ratio(l1_data_ratio);
     row.set_l1_inst_ratio(l1_inst_ratio);
-    row.set_ll_hits(ll_hits);
-    row.set_ll_misses(ll_misses);
+    row.set_ll_hits(static_cast<int>(ll_hits));
+    row.set_ll_misses(static_cast<int>(ll_misses));
     row.set_ll_ratio(ll_ratio);
 }
 
 bool
 missing_instructions_t::print_results()
 {
-    std::cerr << TOOL_NAME << " results:\n";
-    // cache_simulator_t::print_results();
+    std::cerr << TOOL_NAME << " finished.\n";
     return true;
 }
 
@@ -418,7 +417,7 @@ void
 missing_instructions_t::begin_transaction()
 {
     char *errmsg;
-    int rc = sqlite3_exec(db, "BEGIN TRANSACTION;", NULL, NULL, &errmsg);
+    int rc = sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, &errmsg);
     if (rc != SQLITE_OK) {
         std::cerr << "SQL error beginning transaction: " << errmsg;
         // Handle error appropriately...
@@ -427,7 +426,7 @@ missing_instructions_t::begin_transaction()
 }
 
 void
-missing_instructions_t::open_database(const std::string db_filename)
+missing_instructions_t::open_database(const std::string &db_filename)
 {
     int rc = sqlite3_open(db_filename.c_str(), &db);
 
@@ -563,7 +562,7 @@ missing_instructions_t::flush_buffer_to_database()
                                  ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
                                  "?, ?, ?, ?, ?, ?, ?);";
         sqlite3_stmt *stmt;
-        int rc = sqlite3_prepare_v2(db, sql_insert, -1, &stmt, NULL);
+        int rc = sqlite3_prepare_v2(db, sql_insert, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
             std::stringstream ss;
             ss << "Cannot prepare insert statement: " << sqlite3_errmsg(db);
@@ -572,7 +571,7 @@ missing_instructions_t::flush_buffer_to_database()
             throw std::runtime_error(error_msg);
         }
 
-        for (auto &row : row_buffer) {
+        for (auto const &row : row_buffer) {
             insert_row_into_database(
                 row, stmt); // Insert each row. This does NOT finalize the statement.
             rc = sqlite3_step(stmt);
@@ -590,6 +589,7 @@ missing_instructions_t::flush_buffer_to_database()
         std::cout << "Clearing buffer..." << std::endl;
     } catch (const std::exception &e) {
         std::cerr << "Exception occurred during flushing: " << e.what() << std::endl;
+        throw;
     }
     row_buffer.clear(); // Clear the buffer for the next batch
     row_buffer.shrink_to_fit();
@@ -600,7 +600,7 @@ void
 missing_instructions_t::end_transaction()
 {
     char *errmsg;
-    int rc = sqlite3_exec(db, "END TRANSACTION;", NULL, NULL, &errmsg);
+    int rc = sqlite3_exec(db, "END TRANSACTION;", nullptr, nullptr, &errmsg);
     if (rc != SQLITE_OK) {
         std::cerr << "SQL error ending transaction: " << errmsg;
         // Handle error appropriately...

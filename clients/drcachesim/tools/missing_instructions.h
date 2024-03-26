@@ -125,14 +125,14 @@ private:
     create_experiment_insert_statement(const cache_simulator_knobs_t &knobs);
     void
     update_instruction_stats(int core, bool thread_switch, bool core_switch,
-                             const memref_t &memref, cachesim_row &row);
+                             cachesim_row &row) const;
 
     void
     update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
     embed_address_deltas_into_row(cachesim_row &row);
     void
-    open_database(const std::string db_filename);
+    open_database(const std::string &db_filename);
     void
     create_table();
     void
