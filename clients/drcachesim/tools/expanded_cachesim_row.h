@@ -4,6 +4,7 @@
 #include <iostream>
 #include "memref.h"
 #include "cachesim_row.h"
+#include "sqlite3.h"
 
 namespace dynamorio {
 namespace drmemtrace {
@@ -22,6 +23,11 @@ private:
     float ll_ratio;
 
 public:
+    expanded_cachesim_row(long l1_data_misses, long l1_data_hits, long l1_inst_hits,
+                          long l1_inst_misses, long ll_hits, long ll_misses,
+                          float l1_data_ratio, float l1_inst_ratio, float ll_ratio,
+                          int current_instruction_id, int core, bool thread_switch,
+                          bool core_switch);
     // Setters declarations
     void
     set_l1_data_hits(int value);
@@ -65,6 +71,9 @@ public:
     static const char *create_table_string;
 
     static const char *insert_row_string;
+
+    void
+    insert_into_database(sqlite3_stmt *stmt) const override;
 };
 
 } // namespace drmemtrace

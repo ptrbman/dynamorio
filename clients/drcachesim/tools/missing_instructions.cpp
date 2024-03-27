@@ -243,13 +243,14 @@ missing_instructions_t::process_memref(const memref_t &memref)
         if (use_expanded_trace_format)
             row.reset(new expanded_cachesim_row()); // Replaces std::make_unique
         else
-            row.reset(new cachesim_row()); // Replaces std::make_unique
+            row.reset(new cachesim_row(current_instruction_id, core, thread_switch,
+                                       core_switch)); // Replaces std::make_unique
         update_instruction_stats(core, thread_switch, core_switch, *row);
         update_miss_stats(core, memref, *row);
         embed_address_deltas_into_row(*row);
         if (!(row->get_instr_type() == "ifetch" && row->get_access_address_delta() == 0 &&
               row->get_pc_address_delta() == 0)) {
-            buffer_row(*row);
+            buffer_row(row);
         }
         return true;
     } catch (const std::exception &ex) {
@@ -478,72 +479,7 @@ missing_instructions_t::create_table()
 }
 
 void
-missing_instructions_t::insert_row_into_database(const cachesim_row &row,
-                                                 sqlite3_stmt *stmt) const
-{
-    try {
-
-        // Bind values from 'row' to the prepared SQL statement
-        sqlite3_bind_int(stmt, 1, row.get_current_instruction_id());
-        sqlite3_bind_int(stmt, 2, row.get_access_address_delta());
-        sqlite3_bind_int(stmt, 3, row.get_pc_address_delta());
-        sqlite3_bind_int(stmt, 4, row.get_l1d_miss() ? 1 : 0);
-        sqlite3_bind_int(stmt, 5, row.get_l1i_miss() ? 1 : 0);
-        sqlite3_bind_int(stmt, 6, row.get_ll_miss() ? 1 : 0);
-        sqlite3_bind_text(stmt, 7, row.get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 8, row.get_byte_count());
-        sqlite3_bind_text(stmt, 9, row.get_disassembly_string().c_str(), -1,
-                          SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 10, row.get_current_instruction_id());
-        sqlite3_bind_int(stmt, 11, row.get_core());
-        sqlite3_bind_int(stmt, 12, row.get_thread_switch() ? 1 : 0);
-        sqlite3_bind_int(stmt, 13, row.get_core_switch() ? 1 : 0);
-
-    } catch (const std::exception &e) {
-        std::cerr << "Exception: " << e.what() << std::endl;
-        throw;
-    }
-}
-
-void
-missing_instructions_t::insert_row_into_database(const expanded_cachesim_row &row,
-                                                 sqlite3_stmt *stmt) const
-{
-    try {
-
-        // Bind values from 'row' to the prepared SQL statement
-        sqlite3_bind_int(stmt, 1, row.get_current_instruction_id());
-        sqlite3_bind_int(stmt, 2, row.get_access_address_delta());
-        sqlite3_bind_int(stmt, 3, row.get_pc_address_delta());
-        sqlite3_bind_int(stmt, 4, row.get_l1d_miss() ? 1 : 0);
-        sqlite3_bind_int(stmt, 5, row.get_l1i_miss() ? 1 : 0);
-        sqlite3_bind_int(stmt, 6, row.get_ll_miss() ? 1 : 0);
-        sqlite3_bind_text(stmt, 7, row.get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 8, row.get_byte_count());
-        sqlite3_bind_text(stmt, 9, row.get_disassembly_string().c_str(), -1,
-                          SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 10, row.get_current_instruction_id());
-        sqlite3_bind_int(stmt, 11, row.get_core());
-        sqlite3_bind_int(stmt, 12, row.get_thread_switch() ? 1 : 0);
-        sqlite3_bind_int(stmt, 13, row.get_core_switch() ? 1 : 0);
-        sqlite3_bind_int(stmt, 14, row.get_l1_data_hits());
-        sqlite3_bind_int(stmt, 15, row.get_l1_data_misses());
-        sqlite3_bind_double(stmt, 16, row.get_l1_data_ratio());
-        sqlite3_bind_int(stmt, 17, row.get_l1_inst_hits());
-        sqlite3_bind_int(stmt, 18, row.get_l1_inst_misses());
-        sqlite3_bind_double(stmt, 19, row.get_l1_inst_ratio());
-        sqlite3_bind_int(stmt, 20, row.get_ll_hits());
-        sqlite3_bind_int(stmt, 21, row.get_ll_misses());
-        sqlite3_bind_double(stmt, 22, row.get_ll_ratio());
-
-    } catch (const std::exception &e) {
-        std::cerr << "Exception: " << e.what() << std::endl;
-        throw;
-    }
-}
-
-void
-missing_instructions_t::buffer_row(const cachesim_row &row)
+missing_instructions_t::buffer_row(const std::unique_ptr<cachesim_row> &row)
 {
     row_buffer.push_back(row);
 
@@ -579,8 +515,7 @@ missing_instructions_t::flush_buffer_to_database()
         }
 
         for (auto const &row : row_buffer) {
-            insert_row_into_database(
-                row, stmt); // Insert each row. This does NOT finalize the statement.
+            row->insert_into_database(stmt);
             rc = sqlite3_step(stmt);
             if (rc != SQLITE_DONE) {
                 std::stringstream ss;
@@ -600,7 +535,7 @@ missing_instructions_t::flush_buffer_to_database()
     }
     row_buffer.clear(); // Clear the buffer for the next batch
     row_buffer.shrink_to_fit();
-    std::vector<cachesim_row>().swap(row_buffer);
+    std::vector<std::unique_ptr<cachesim_row>>().swap(row_buffer);
 }
 
 void

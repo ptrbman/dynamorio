@@ -3,6 +3,61 @@
 namespace dynamorio {
 namespace drmemtrace {
 
+// TODO: finish this and test it and let it rip
+expanded_cachesim_row::expanded_cachesim_row(long l1_data_misses, long l1_data_hits,
+                                             long l1_inst_hits, long l1_inst_misses,
+                                             long ll_hits, long ll_misses,
+                                             float l1_data_ratio, float l1_inst_ratio,
+                                             float ll_ratio, int current_instruction_id,
+                                             int core, bool thread_switch,
+                                             bool core_switch)
+    : cachesim_row(current_instruction_id, core, thread_switch, core_switch)
+    , l1_data_hits(static_cast<int>(l1_data_hits))
+    , l1_data_misses(static_cast<int>(l1_data_misses))
+    , l1_inst_hits(static_cast<int>(l1_inst_hits))
+    , l1_inst_misses(static_cast<int>(l1_inst_misses))
+    , ll_hits(static_cast<int>(ll_hits))
+    , ll_misses()
+
+{
+}
+
+void
+expanded_cachesim_row::insert_into_database(sqlite3_stmt *stmt) const
+{
+    try {
+
+        // Bind values from 'row' to the prepared SQL statement
+        sqlite3_bind_int(stmt, 1, get_current_instruction_id());
+        sqlite3_bind_int(stmt, 2, get_access_address_delta());
+        sqlite3_bind_int(stmt, 3, get_pc_address_delta());
+        sqlite3_bind_int(stmt, 4, get_l1d_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 5, get_l1i_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 6, get_ll_miss() ? 1 : 0);
+        sqlite3_bind_text(stmt, 7, get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 8, get_byte_count());
+        sqlite3_bind_text(stmt, 9, get_disassembly_string().c_str(), -1,
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 10, get_current_instruction_id());
+        sqlite3_bind_int(stmt, 11, get_core());
+        sqlite3_bind_int(stmt, 12, get_thread_switch() ? 1 : 0);
+        sqlite3_bind_int(stmt, 13, get_core_switch() ? 1 : 0);
+        sqlite3_bind_int(stmt, 14, get_l1_data_hits());
+        sqlite3_bind_int(stmt, 15, get_l1_data_misses());
+        sqlite3_bind_double(stmt, 16, get_l1_data_ratio());
+        sqlite3_bind_int(stmt, 17, get_l1_inst_hits());
+        sqlite3_bind_int(stmt, 18, get_l1_inst_misses());
+        sqlite3_bind_double(stmt, 19, get_l1_inst_ratio());
+        sqlite3_bind_int(stmt, 20, get_ll_hits());
+        sqlite3_bind_int(stmt, 21, get_ll_misses());
+        sqlite3_bind_double(stmt, 22, get_ll_ratio());
+
+    } catch (const std::exception &e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw;
+    }
+}
+
 const char *expanded_cachesim_row::create_table_string =
     "CREATE TABLE IF NOT EXISTS cache_stats ("
     "instruction_number INTEGER, "

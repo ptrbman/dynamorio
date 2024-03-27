@@ -3,6 +3,8 @@
 
 #include <iostream>
 #include "memref.h"
+#include <sqlite3.h>
+
 namespace dynamorio {
 namespace drmemtrace {
 /// @brief Class contains data used for inserting new execution row into a DB.
@@ -25,6 +27,8 @@ protected:
     bool core_switch;
 
 public:
+    cachesim_row(int current_instruction_id, int core, bool thread_switch,
+                         bool core_switch);
     // Setters declarations
     void
     set_access_address(const addr_t value);
@@ -88,6 +92,9 @@ public:
     static const char *create_table_string;
 
     static const char *insert_row_string;
+
+    virtual void
+    insert_into_database(sqlite3_stmt *stmt) const;
 };
 
 } // namespace drmemtrace

@@ -3,6 +3,42 @@
 namespace dynamorio {
 namespace drmemtrace {
 
+cachesim_row::cachesim_row(int current_instruction_id, int core, bool thread_switch,
+                           bool core_switch)
+    : current_instruction_id(current_instruction_id)
+    , core(static_cast<uint8_t>(core))
+    , thread_switch(thread_switch)
+    , core_switch(core_switch)
+{
+}
+
+void
+cachesim_row::insert_into_database(sqlite3_stmt *stmt) const
+{
+    try {
+
+        // Bind values from '' to the prepared SQL statement
+        sqlite3_bind_int(stmt, 1, get_current_instruction_id());
+        sqlite3_bind_int(stmt, 2, get_access_address_delta());
+        sqlite3_bind_int(stmt, 3, get_pc_address_delta());
+        sqlite3_bind_int(stmt, 4, get_l1d_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 5, get_l1i_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 6, get_ll_miss() ? 1 : 0);
+        sqlite3_bind_text(stmt, 7, get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 8, get_byte_count());
+        sqlite3_bind_text(stmt, 9, get_disassembly_string().c_str(), -1,
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 10, get_current_instruction_id());
+        sqlite3_bind_int(stmt, 11, get_core());
+        sqlite3_bind_int(stmt, 12, get_thread_switch() ? 1 : 0);
+        sqlite3_bind_int(stmt, 13, get_core_switch() ? 1 : 0);
+
+    } catch (const std::exception &e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw;
+    }
+}
+
 const char *cachesim_row::create_table_string = "CREATE TABLE IF NOT EXISTS cache_stats ("
                                                 "instruction_number INTEGER, "
                                                 "access_address_delta INTEGER, "

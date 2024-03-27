@@ -139,13 +139,10 @@ private:
     void
     create_table();
     void
-    insert_row_into_database(const cachesim_row &row, sqlite3_stmt *stmt) const;
-    void
-    insert_row_into_database(const expanded_cachesim_row &row, sqlite3_stmt *stmt) const;
-    void
     begin_transaction();
     void
-    buffer_row(const cachesim_row &row);
+    buffer_row(const std::unique_ptr<cachesim_row>& row);
+
     void
     flush_buffer_to_database();
     void
@@ -158,7 +155,7 @@ private:
     addr_t last_pc_address = 0;
     addr_t last_access_address = 0;
     sqlite3 *db = nullptr;
-    std::vector<cachesim_row> row_buffer;
+    std::vector<std::unique_ptr<cachesim_row>> row_buffer;
     unsigned int max_buffer_size;
     unsigned int max_trace_length;
     bool use_expanded_trace_format;
