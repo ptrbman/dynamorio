@@ -141,6 +141,8 @@ private:
     void
     insert_row_into_database(const cachesim_row &row, sqlite3_stmt *stmt) const;
     void
+    insert_row_into_database(const expanded_cachesim_row &row, sqlite3_stmt *stmt) const;
+    void
     begin_transaction();
     void
     buffer_row(const cachesim_row &row);

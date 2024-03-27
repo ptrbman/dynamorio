@@ -8,7 +8,7 @@
 namespace dynamorio {
 namespace drmemtrace {
 /// @brief Class contains data used for inserting new execution row into a DB.
-class expanded_cachesim_row: public cachesim_row{
+class expanded_cachesim_row : public cachesim_row {
 private:
     /* data */
     int l1_data_hits;
@@ -61,6 +61,31 @@ public:
     get_ll_misses() const;
     float
     get_ll_ratio() const;
+
+    static constexpr std::string_view create_table_string =
+        "CREATE TABLE IF NOT EXISTS cache_stats ("
+        "instruction_number INTEGER PRIMARY KEY, "
+        "access_address_delta INTEGER, "
+        "pc_address_delta INTEGER, "
+        "l1d_miss INTEGER, "
+        "l1i_miss INTEGER, "
+        "ll_miss INTEGER, "
+        "instr_type TEXT, "
+        "byte_count INTEGER, "
+        "disassembly_string TEXT, "
+        "current_instruction_id INTEGER, "
+        "core INTEGER, "
+        "thread_switch INTEGER, "
+        "core_switch INTEGER, "
+        "l1_data_hits INTEGER, "
+        "l1_data_misses INTEGER, "
+        "l1_data_ratio REAL, "
+        "l1_inst_hits INTEGER, "
+        "l1_inst_misses INTEGER, "
+        "l1_inst_ratio REAL, "
+        "ll_hits INTEGER, "
+        "ll_misses INTEGER, "
+        "ll_ratio REAL);";
 };
 
 } // namespace drmemtrace

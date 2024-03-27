@@ -458,33 +458,12 @@ missing_instructions_t::open_database(const std::string &db_filename)
 void
 missing_instructions_t::create_table()
 {
-    // TODO: here this needs to be dependent on use_expanded_form somehow cleverly
-    const char *sql_create_table = "CREATE TABLE IF NOT EXISTS cache_stats ("
-                                   "instruction_number INTEGER PRIMARY KEY, "
-                                   "access_address_delta INTEGER, "
-                                   "pc_address_delta INTEGER, "
-                                   "l1d_miss INTEGER, "
-                                   "l1i_miss INTEGER, "
-                                   "ll_miss INTEGER, "
-                                   "instr_type TEXT, "
-                                   "byte_count INTEGER, "
-                                   "disassembly_string TEXT, "
-                                   "current_instruction_id INTEGER, "
-                                   "core INTEGER, "
-                                   "thread_switch INTEGER, "
-                                   "core_switch INTEGER, "
-                                   "l1_data_hits INTEGER, "
-                                   "l1_data_misses INTEGER, "
-                                   "l1_data_ratio REAL, "
-                                   "l1_inst_hits INTEGER, "
-                                   "l1_inst_misses INTEGER, "
-                                   "l1_inst_ratio REAL, "
-                                   "ll_hits INTEGER, "
-                                   "ll_misses INTEGER, "
-                                   "ll_ratio REAL);";
+    const char *sql_create_table = (use_expanded_trace_format)
+        ? std::string(expanded_cachesim_row::create_table_string).c_str()
+        : std::string(cachesim_row::create_table_string).c_str();
 
     char *errmsg;
-    int rc = sqlite3_exec(db, sql_create_table, 0, 0, &errmsg);
+    int rc = sqlite3_exec(db, sql_create_table, nullptr, nullptr, &errmsg);
     if (rc != SQLITE_OK) {
         std::cerr << "SQL error: " << errmsg;
         sqlite3_free(errmsg);
@@ -496,6 +475,34 @@ missing_instructions_t::create_table()
 
 void
 missing_instructions_t::insert_row_into_database(const cachesim_row &row,
+                                                 sqlite3_stmt *stmt) const
+{
+    try {
+
+        // Bind values from 'row' to the prepared SQL statement
+        sqlite3_bind_int(stmt, 1, row.get_current_instruction_id());
+        sqlite3_bind_int(stmt, 2, row.get_access_address_delta());
+        sqlite3_bind_int(stmt, 3, row.get_pc_address_delta());
+        sqlite3_bind_int(stmt, 4, row.get_l1d_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 5, row.get_l1i_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 6, row.get_ll_miss() ? 1 : 0);
+        sqlite3_bind_text(stmt, 7, row.get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 8, row.get_byte_count());
+        sqlite3_bind_text(stmt, 9, row.get_disassembly_string().c_str(), -1,
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 10, row.get_current_instruction_id());
+        sqlite3_bind_int(stmt, 11, row.get_core());
+        sqlite3_bind_int(stmt, 12, row.get_thread_switch() ? 1 : 0);
+        sqlite3_bind_int(stmt, 13, row.get_core_switch() ? 1 : 0);
+
+    } catch (const std::exception &e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw;
+    }
+}
+
+void
+missing_instructions_t::insert_row_into_database(const expanded_cachesim_row &row,
                                                  sqlite3_stmt *stmt) const
 {
     try {
@@ -527,7 +534,7 @@ missing_instructions_t::insert_row_into_database(const cachesim_row &row,
 
     } catch (const std::exception &e) {
         std::cerr << "Exception: " << e.what() << std::endl;
-        throw e;
+        throw;
     }
 }
 
