@@ -149,6 +149,7 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
 analysis_tool_t *
 missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 {
+    // Won't fix this.
     return new missing_instructions_t(knobs);
 }
 
@@ -214,6 +215,9 @@ missing_instructions_t::create_experiment_insert_statement(
 bool
 missing_instructions_t::process_memref(const memref_t &memref)
 {
+    if (current_instruction_id >= max_trace_length) {
+        close_database();
+    }
     current_instruction_id++;
 
     try {
@@ -236,9 +240,9 @@ missing_instructions_t::process_memref(const memref_t &memref)
             std::cerr << "Doing " << current_instruction_id << std::endl;
         std::unique_ptr<cachesim_row> row;
         if (use_expanded_trace_format)
-            row = std::make_unique<expanded_cachesim_row>();
+            row.reset(new expanded_cachesim_row()); // Replaces std::make_unique
         else
-            row = std::make_unique<cachesim_row>();
+            row.reset(new cachesim_row()); // Replaces std::make_unique
         update_instruction_stats(core, thread_switch, core_switch, *row);
         update_miss_stats(core, memref, *row);
         embed_address_deltas_into_row(*row);
@@ -544,10 +548,8 @@ missing_instructions_t::buffer_row(const cachesim_row &row)
 
     if (row_buffer.size() % 100000 == 0) {
         std::cout << "buffer at " << row_buffer.size() << std::endl;
-        std::cout << "buffer size : " << sizeof(row_buffer[0]) * row_buffer.size()
-                  << std::endl;
     }
-    if (row_buffer.size() >= 10000000) { // Check if we've reached the buffer limit
+    if (row_buffer.size() >= max_buffer_size) { // Check if we've reached the buffer limit
         flush_buffer_to_database();
     }
 }
