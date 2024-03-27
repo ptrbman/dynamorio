@@ -85,38 +85,9 @@ public:
     bool
     get_core_switch() const;
 
-    static constexpr char* create_table_string =
-        "CREATE TABLE IF NOT EXISTS cache_stats ("
-        "instruction_number INTEGER PRIMARY KEY, "
-        "access_address_delta INTEGER, "
-        "pc_address_delta INTEGER, "
-        "l1d_miss INTEGER, "
-        "l1i_miss INTEGER, "
-        "ll_miss INTEGER, "
-        "instr_type TEXT, "
-        "byte_count INTEGER, "
-        "disassembly_string TEXT, "
-        "current_instruction_id INTEGER, "
-        "core INTEGER, "
-        "thread_switch INTEGER, "
-        "core_switch INTEGER);";
+    static const char *create_table_string;
 
-    static constexpr char* insert_row_string =
-        "INSERT INTO cache_stats ("
-        "instruction_number, "
-        "access_address_delta, "
-        "pc_address_delta, "
-        "l1d_miss, "
-        "l1i_miss, "
-        "ll_miss, "
-        "instr_type, "
-        "byte_count, "
-        "disassembly_string, "
-        "current_instruction_id, "
-        "core, "
-        "thread_switch, "
-        "core_switch, "
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+    static const char *insert_row_string;
 };
 
 } // namespace drmemtrace

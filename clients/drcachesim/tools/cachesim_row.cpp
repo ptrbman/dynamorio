@@ -2,6 +2,38 @@
 
 namespace dynamorio {
 namespace drmemtrace {
+
+const char *cachesim_row::create_table_string = "CREATE TABLE IF NOT EXISTS cache_stats ("
+                                                "instruction_number INTEGER, "
+                                                "access_address_delta INTEGER, "
+                                                "pc_address_delta INTEGER, "
+                                                "l1d_miss INTEGER, "
+                                                "l1i_miss INTEGER, "
+                                                "ll_miss INTEGER, "
+                                                "instr_type TEXT, "
+                                                "byte_count INTEGER, "
+                                                "disassembly_string TEXT, "
+                                                "current_instruction_id INTEGER, "
+                                                "core INTEGER, "
+                                                "thread_switch INTEGER, "
+                                                "core_switch INTEGER);";
+
+const char *cachesim_row::insert_row_string =
+    "INSERT INTO cache_stats ("
+    "instruction_number, "
+    "access_address_delta, "
+    "pc_address_delta, "
+    "l1d_miss, "
+    "l1i_miss, "
+    "ll_miss, "
+    "instr_type, "
+    "byte_count, "
+    "disassembly_string, "
+    "current_instruction_id, "
+    "core, "
+    "thread_switch, "
+    "core_switch, "
+    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 // Setters
 void
 cachesim_row::set_access_address(const addr_t value)
