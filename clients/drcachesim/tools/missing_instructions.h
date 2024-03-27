@@ -42,11 +42,10 @@
 #include "dr_api.h" // Must be before trace_entry.h from analysis_tool.h.
 #include "analysis_tool.h"
 #include "../simulator/cache_simulator.h"
+#include "expanded_cachesim_row.h"
 #include "cachesim_row.h"
 #include "memref.h"
-// #include "raw2trace.h"
-// #include "raw2trace_directory.h"
-
+#include <sqlite3.h>
 namespace dynamorio {
 namespace drmemtrace {
 class missing_instructions_t : public cache_simulator_t {
@@ -58,16 +57,12 @@ public:
 
     void
     get_opcode(const memref_t &memref, cachesim_row &row);
-    // Destructor to ensure the file is closed
-    ~missing_instructions_t()
+    // Destructor to ensure the database is closed
+    ~missing_instructions_t() final
     {
-        flush_buffer(); // Ensure buffer is flushed upon destruction
-        if (gz_cache_file) {
-            gzclose(gz_cache_file); // Close the gzFile resource
-            gz_cache_file = nullptr;
-        }
+        close_database();
     }
-    missing_instructions_t(const cache_simulator_knobs_t &knobs);
+    explicit missing_instructions_t(const cache_simulator_knobs_t &knobs);
 
     bool
     process_memref(const memref_t &memref) override;
@@ -124,46 +119,49 @@ protected:
 
 private:
     int current_instruction_id = 0;
-    uintptr_t curr_core_id;
+    uintptr_t curr_core_id = 0;
     memref_tid_t curr_thread_id;
-    int
-    insert_new_experiment(const cache_simulator_knobs_t &knobs);
+
     void
     create_experiment_insert_statement(const cache_simulator_knobs_t &knobs);
     void
     update_instruction_stats(int core, bool thread_switch, bool core_switch,
-                             const memref_t &memref, cachesim_row &row);
-
+                             cachesim_row &row) const;
     void
-    write_csv_header();
+    update_instruction_stats(int core, bool thread_switch, bool core_switch,
+                             expanded_cachesim_row &row) const;
     void
     update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
-    insert_new_row(const cachesim_row &row);
+    embed_address_deltas_into_row(cachesim_row &row);
     void
-    write_compressed_row_with_delta(const cachesim_row &row);
-
-    long
-    getFileSize(const std::string &fileName);
+    open_database(const std::string &db_filename);
     void
-    splitAndCompress(const std::string &fileName, int max_size);
+    create_table();
     void
-    open_compressed_output();
+    insert_row_into_database(const cachesim_row &row, sqlite3_stmt *stmt) const;
     void
-    write_compressed_row(const std::string &row);
+    insert_row_into_database(const expanded_cachesim_row &row, sqlite3_stmt *stmt) const;
     void
-    close_compressed_output();
+    begin_transaction();
     void
-    flush_buffer();
-    std::string cache_stats_filename;
+    buffer_row(const cachesim_row &row);
+    void
+    flush_buffer_to_database();
+    void
+    end_transaction();
+    void
+    close_database();
+    std::string cache_database_filename;
     std::string experiments_filename = "experiments.csv";
     std::string csv_log_path = "";
-    gzFile gz_cache_file = nullptr; // Handle for compressed output
     addr_t last_pc_address = 0;
     addr_t last_access_address = 0;
-    std::string write_buffer; // Accumulates data to be written
-    const size_t buffer_threshold =
-        1024 * 1024 * 500; // 500 MB buffer size, adjust as needed
+    sqlite3 *db = nullptr;
+    std::vector<cachesim_row> row_buffer;
+    unsigned int max_buffer_size;
+    unsigned int max_trace_length;
+    bool use_expanded_trace_format;
 };
 
 } // namespace drmemtrace

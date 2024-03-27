@@ -2,19 +2,62 @@
 
 namespace dynamorio {
 namespace drmemtrace {
+
+const char *cachesim_row::create_table_string = "CREATE TABLE IF NOT EXISTS cache_stats ("
+                                                "instruction_number INTEGER, "
+                                                "access_address_delta INTEGER, "
+                                                "pc_address_delta INTEGER, "
+                                                "l1d_miss INTEGER, "
+                                                "l1i_miss INTEGER, "
+                                                "ll_miss INTEGER, "
+                                                "instr_type TEXT, "
+                                                "byte_count INTEGER, "
+                                                "disassembly_string TEXT, "
+                                                "current_instruction_id INTEGER, "
+                                                "core INTEGER, "
+                                                "thread_switch INTEGER, "
+                                                "core_switch INTEGER);";
+
+const char *cachesim_row::insert_row_string =
+    "INSERT INTO cache_stats ("
+    "instruction_number, "
+    "access_address_delta, "
+    "pc_address_delta, "
+    "l1d_miss, "
+    "l1i_miss, "
+    "ll_miss, "
+    "instr_type, "
+    "byte_count, "
+    "disassembly_string, "
+    "current_instruction_id, "
+    "core, "
+    "thread_switch, "
+    "core_switch"
+    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 // Setters
 void
-cachesim_row::set_access_address(const std::string &value)
+cachesim_row::set_access_address(const addr_t value)
 {
     access_address = value;
 }
 void
-cachesim_row::set_pc_address(const std::string &value)
+cachesim_row::set_pc_address(const addr_t value)
 {
     pc_address = value;
 }
-void
 
+void
+cachesim_row::set_access_address_delta(int value)
+{
+    access_address_delta = value;
+}
+
+void
+cachesim_row::set_pc_address_delta(int value)
+{
+    pc_address_delta = value;
+}
+void
 cachesim_row::set_l1d_miss(bool value)
 {
     l1d_miss = value;
@@ -52,7 +95,7 @@ cachesim_row::set_current_instruction_id(int value)
     current_instruction_id = value;
 }
 void
-cachesim_row::set_core(int value)
+cachesim_row::set_core(uint8_t value)
 {
     core = value;
 }
@@ -66,61 +109,26 @@ cachesim_row::set_core_switch(bool value)
 {
     core_switch = value;
 }
-void
-cachesim_row::set_l1_data_hits(int value)
-{
-    l1_data_hits = value;
-}
-void
-cachesim_row::set_l1_data_misses(int value)
-{
-    l1_data_misses = value;
-}
-void
-cachesim_row::set_l1_data_ratio(float value)
-{
-    l1_data_ratio = value;
-}
-void
-cachesim_row::set_l1_inst_hits(int value)
-{
-    l1_inst_hits = value;
-}
-void
-cachesim_row::set_l1_inst_misses(int value)
-{
-    l1_inst_misses = value;
-}
-void
-cachesim_row::set_l1_inst_ratio(float value)
-{
-    l1_inst_ratio = value;
-}
-void
-cachesim_row::set_ll_hits(int value)
-{
-    ll_hits = value;
-}
-void
-cachesim_row::set_ll_misses(int value)
-{
-    ll_misses = value;
-}
-void
-cachesim_row::set_ll_ratio(float value)
-{
-    ll_ratio = value;
-}
 
-std::string
+addr_t
 cachesim_row::get_access_address() const
 {
     return access_address;
 }
-std::string
+addr_t
 cachesim_row::get_pc_address() const
 {
     return pc_address;
+}
+int
+cachesim_row::get_pc_address_delta() const
+{
+    return pc_address_delta;
+}
+int
+cachesim_row::get_access_address_delta() const
+{
+    return access_address_delta;
 }
 bool
 cachesim_row::get_l1d_miss() const
@@ -157,7 +165,7 @@ cachesim_row::get_current_instruction_id() const
 {
     return current_instruction_id;
 }
-int
+uint8_t
 cachesim_row::get_core() const
 {
     return core;
@@ -171,51 +179,6 @@ bool
 cachesim_row::get_core_switch() const
 {
     return core_switch;
-}
-int
-cachesim_row::get_l1_data_hits() const
-{
-    return l1_data_hits;
-}
-int
-cachesim_row::get_l1_data_misses() const
-{
-    return l1_data_misses;
-}
-float
-cachesim_row::get_l1_data_ratio() const
-{
-    return l1_data_ratio;
-}
-int
-cachesim_row::get_l1_inst_hits() const
-{
-    return l1_inst_hits;
-}
-int
-cachesim_row::get_l1_inst_misses() const
-{
-    return l1_inst_misses;
-}
-float
-cachesim_row::get_l1_inst_ratio() const
-{
-    return l1_inst_ratio;
-}
-int
-cachesim_row::get_ll_hits() const
-{
-    return ll_hits;
-}
-int
-cachesim_row::get_ll_misses() const
-{
-    return ll_misses;
-}
-float
-cachesim_row::get_ll_ratio() const
-{
-    return ll_ratio;
 }
 
 } // namespace drmemtrace
