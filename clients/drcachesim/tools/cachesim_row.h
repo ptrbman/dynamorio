@@ -1,13 +1,13 @@
 #ifndef _CACHE_SIMULATOR_ROW_H_
-#    define _CACHE_SIMULATOR_H_ 1
+#define _CACHE_SIMULATOR_ROW_H_ 1
 
-#    include <iostream>
-#    include "memref.h"
+#include <iostream>
+#include "memref.h"
 namespace dynamorio {
 namespace drmemtrace {
 /// @brief Class contains data used for inserting new execution row into a DB.
 class cachesim_row {
-private:
+protected:
     /* data */
     addr_t access_address;
     addr_t pc_address;
@@ -23,20 +23,8 @@ private:
     uint8_t core;
     bool thread_switch;
     bool core_switch;
-    int l1_data_hits;
-    int l1_data_misses;
-    float l1_data_ratio;
-    int l1_inst_hits;
-    int l1_inst_misses;
-    float l1_inst_ratio;
-    int ll_hits;
-    int ll_misses;
-    float ll_ratio;
 
 public:
-    // cachesim_row(/* args */);
-    // ~cachesim_row();
-
     // Setters declarations
     void
     set_access_address(const addr_t value);
@@ -66,24 +54,6 @@ public:
     set_thread_switch(bool value);
     void
     set_core_switch(bool value);
-    void
-    set_l1_data_hits(int value);
-    void
-    set_l1_data_misses(int value);
-    void
-    set_l1_data_ratio(float value);
-    void
-    set_l1_inst_hits(int value);
-    void
-    set_l1_inst_misses(int value);
-    void
-    set_l1_inst_ratio(float value);
-    void
-    set_ll_hits(int value);
-    void
-    set_ll_misses(int value);
-    void
-    set_ll_ratio(float value);
 
     // Getters declarations
     addr_t
@@ -114,33 +84,12 @@ public:
     get_thread_switch() const;
     bool
     get_core_switch() const;
-    int
-    get_l1_data_hits() const;
-    int
-    get_l1_data_misses() const;
-    float
-    get_l1_data_ratio() const;
-    int
-    get_l1_inst_hits() const;
-    int
-    get_l1_inst_misses() const;
-    float
-    get_l1_inst_ratio() const;
-    int
-    get_ll_hits() const;
-    int
-    get_ll_misses() const;
-    float
-    get_ll_ratio() const;
+
+    static const char *create_table_string;
+
+    static const char *insert_row_string;
 };
 
-// cachesim_row::cachesim_row(/* args */)
-// {
-// }
-
-// cachesim_row::~cachesim_row()
-// {
-// }
 } // namespace drmemtrace
 } // namespace dynamorio
 #endif /*_CACHE_SIMULATOR_ROW_H*/

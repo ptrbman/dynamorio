@@ -378,7 +378,7 @@ include_directories(${SQLite3_INCLUDE_DIRS})
 target_link_libraries(drmemtrace_missing_instructions SQLite::SQLite3)
 # Manually set the include directory for cachesimrow
 # Add your cachesim_row.cpp source file
-target_sources(drmemtrace_missing_instructions PRIVATE tools/cachesim_row.cpp)
+target_sources(drmemtrace_missing_instructions PRIVATE tools/cachesim_row.cpp tools/expanded_cachesim_row.cpp)
 
 # We show one example of how to create a standalone analyzer of trace
 # files that does not need to link with DR.

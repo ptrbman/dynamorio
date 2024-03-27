@@ -59,7 +59,6 @@ namespace drmemtrace {
 
 const std::string missing_instructions_t::TOOL_NAME = "Missing_Instructions tool";
 
-// TODO: fix this entire method.
 void
 missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
 {
@@ -150,13 +149,20 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
 analysis_tool_t *
 missing_instructions_tool_create(const cache_simulator_knobs_t &knobs)
 {
+    // Won't fix this.
     return new missing_instructions_t(knobs);
 }
 
 missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &knobs)
     : cache_simulator_t(knobs)
     , csv_log_path(knobs_.cache_trace_log_path)
+    , max_buffer_size(knobs_.cachesim_row_buffer_size)
+    , max_trace_length(knobs_.max_trace_length)
 {
+    std::string format = knobs_.trace_form;
+    std::transform(format.begin(), format.end(), format.begin(), ::tolower);
+    use_expanded_trace_format = (format == "expanded");
+
     std::cout << "Path for logging: " << csv_log_path << "\n";
     create_experiment_insert_statement(knobs_);
 }
@@ -209,6 +215,10 @@ missing_instructions_t::create_experiment_insert_statement(
 bool
 missing_instructions_t::process_memref(const memref_t &memref)
 {
+    if (static_cast<unsigned int>(current_instruction_id) >= max_trace_length) {
+        close_database();
+        return false;
+    }
     current_instruction_id++;
 
     try {
@@ -229,8 +239,11 @@ missing_instructions_t::process_memref(const memref_t &memref)
         }
         if (current_instruction_id % 100000 == 0)
             std::cerr << "Doing " << current_instruction_id << std::endl;
-        std::unique_ptr<cachesim_row> row(new cachesim_row());
-
+        std::unique_ptr<cachesim_row> row;
+        if (use_expanded_trace_format)
+            row.reset(new expanded_cachesim_row()); // Replaces std::make_unique
+        else
+            row.reset(new cachesim_row()); // Replaces std::make_unique
         update_instruction_stats(core, thread_switch, core_switch, *row);
         update_miss_stats(core, memref, *row);
         embed_address_deltas_into_row(*row);
@@ -365,11 +378,20 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
 
     get_opcode(memref, row);
 }
-
 void
 missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
                                                  bool core_switch,
                                                  cachesim_row &row) const
+{
+    row.set_current_instruction_id(current_instruction_id);
+    row.set_core(static_cast<uint8_t>(core));
+    row.set_thread_switch(thread_switch);
+    row.set_core_switch(core_switch);
+}
+void
+missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
+                                                 bool core_switch,
+                                                 expanded_cachesim_row &row) const
 {
     long int l1_data_hits = cache_simulator_t::get_cache_metric(
         metric_name_t::HITS, 0, core, cache_split_t::DATA);
@@ -440,32 +462,12 @@ missing_instructions_t::open_database(const std::string &db_filename)
 void
 missing_instructions_t::create_table()
 {
-    const char *sql_create_table = "CREATE TABLE IF NOT EXISTS cache_stats ("
-                                   "instruction_number INTEGER PRIMARY KEY, "
-                                   "access_address_delta INTEGER, "
-                                   "pc_address_delta INTEGER, "
-                                   "l1d_miss INTEGER, "
-                                   "l1i_miss INTEGER, "
-                                   "ll_miss INTEGER, "
-                                   "instr_type TEXT, "
-                                   "byte_count INTEGER, "
-                                   "disassembly_string TEXT, "
-                                   "current_instruction_id INTEGER, "
-                                   "core INTEGER, "
-                                   "thread_switch INTEGER, "
-                                   "core_switch INTEGER, "
-                                   "l1_data_hits INTEGER, "
-                                   "l1_data_misses INTEGER, "
-                                   "l1_data_ratio REAL, "
-                                   "l1_inst_hits INTEGER, "
-                                   "l1_inst_misses INTEGER, "
-                                   "l1_inst_ratio REAL, "
-                                   "ll_hits INTEGER, "
-                                   "ll_misses INTEGER, "
-                                   "ll_ratio REAL);";
+    const char *sql_create_table = use_expanded_trace_format
+        ? expanded_cachesim_row::create_table_string
+        : cachesim_row::create_table_string;
 
     char *errmsg;
-    int rc = sqlite3_exec(db, sql_create_table, 0, 0, &errmsg);
+    int rc = sqlite3_exec(db, sql_create_table, nullptr, nullptr, &errmsg);
     if (rc != SQLITE_OK) {
         std::cerr << "SQL error: " << errmsg;
         sqlite3_free(errmsg);
@@ -477,7 +479,35 @@ missing_instructions_t::create_table()
 
 void
 missing_instructions_t::insert_row_into_database(const cachesim_row &row,
-                                                 sqlite3_stmt *stmt)
+                                                 sqlite3_stmt *stmt) const
+{
+    try {
+
+        // Bind values from 'row' to the prepared SQL statement
+        sqlite3_bind_int(stmt, 1, row.get_current_instruction_id());
+        sqlite3_bind_int(stmt, 2, row.get_access_address_delta());
+        sqlite3_bind_int(stmt, 3, row.get_pc_address_delta());
+        sqlite3_bind_int(stmt, 4, row.get_l1d_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 5, row.get_l1i_miss() ? 1 : 0);
+        sqlite3_bind_int(stmt, 6, row.get_ll_miss() ? 1 : 0);
+        sqlite3_bind_text(stmt, 7, row.get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 8, row.get_byte_count());
+        sqlite3_bind_text(stmt, 9, row.get_disassembly_string().c_str(), -1,
+                          SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 10, row.get_current_instruction_id());
+        sqlite3_bind_int(stmt, 11, row.get_core());
+        sqlite3_bind_int(stmt, 12, row.get_thread_switch() ? 1 : 0);
+        sqlite3_bind_int(stmt, 13, row.get_core_switch() ? 1 : 0);
+
+    } catch (const std::exception &e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw;
+    }
+}
+
+void
+missing_instructions_t::insert_row_into_database(const expanded_cachesim_row &row,
+                                                 sqlite3_stmt *stmt) const
 {
     try {
 
@@ -508,7 +538,7 @@ missing_instructions_t::insert_row_into_database(const cachesim_row &row,
 
     } catch (const std::exception &e) {
         std::cerr << "Exception: " << e.what() << std::endl;
-        throw e;
+        throw;
     }
 }
 
@@ -519,10 +549,8 @@ missing_instructions_t::buffer_row(const cachesim_row &row)
 
     if (row_buffer.size() % 100000 == 0) {
         std::cout << "buffer at " << row_buffer.size() << std::endl;
-        std::cout << "buffer size : " << sizeof(row_buffer[0]) * row_buffer.size()
-                  << std::endl;
     }
-    if (row_buffer.size() >= 10000000) { // Check if we've reached the buffer limit
+    if (row_buffer.size() >= max_buffer_size) { // Check if we've reached the buffer limit
         flush_buffer_to_database();
     }
 }
@@ -536,31 +564,10 @@ missing_instructions_t::flush_buffer_to_database()
         begin_transaction(); // Start the transaction
 
         // Preparing the SQL statement once, instead of re-preparing it for every row
-        const char *sql_insert = "INSERT INTO cache_stats ("
-                                 "instruction_number, "
-                                 "access_address_delta, "
-                                 "pc_address_delta, "
-                                 "l1d_miss, "
-                                 "l1i_miss, "
-                                 "ll_miss, "
-                                 "instr_type, "
-                                 "byte_count, "
-                                 "disassembly_string, "
-                                 "current_instruction_id, "
-                                 "core, "
-                                 "thread_switch, "
-                                 "core_switch, "
-                                 "l1_data_hits, "
-                                 "l1_data_misses, "
-                                 "l1_data_ratio, "
-                                 "l1_inst_hits, "
-                                 "l1_inst_misses, "
-                                 "l1_inst_ratio, "
-                                 "ll_hits, "
-                                 "ll_misses, "
-                                 "ll_ratio"
-                                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                                 "?, ?, ?, ?, ?, ?, ?);";
+        const char *sql_insert = use_expanded_trace_format
+            ? expanded_cachesim_row::insert_row_string
+            : cachesim_row::insert_row_string;
+
         sqlite3_stmt *stmt;
         int rc = sqlite3_prepare_v2(db, sql_insert, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {

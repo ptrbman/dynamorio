@@ -73,6 +73,9 @@ struct cache_simulator_knobs_t {
         , use_physical(false)
         , verbose(0)
         , cache_trace_log_path("")
+        , max_trace_length(100000000)
+        , cachesim_row_buffer_size(1000000)
+        , trace_form("expanded")
     {
     }
     unsigned int num_cores;
@@ -95,6 +98,9 @@ struct cache_simulator_knobs_t {
     bool use_physical;
     unsigned int verbose;
     std::string cache_trace_log_path;
+    unsigned int max_trace_length;
+    unsigned int cachesim_row_buffer_size;
+    std::string trace_form;
 };
 
 /** Creates an instance of a cache simulator with a 2-level hierarchy. */

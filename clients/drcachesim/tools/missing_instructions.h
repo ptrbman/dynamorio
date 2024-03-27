@@ -42,6 +42,7 @@
 #include "dr_api.h" // Must be before trace_entry.h from analysis_tool.h.
 #include "analysis_tool.h"
 #include "../simulator/cache_simulator.h"
+#include "expanded_cachesim_row.h"
 #include "cachesim_row.h"
 #include "memref.h"
 #include <sqlite3.h>
@@ -126,7 +127,9 @@ private:
     void
     update_instruction_stats(int core, bool thread_switch, bool core_switch,
                              cachesim_row &row) const;
-
+    void
+    update_instruction_stats(int core, bool thread_switch, bool core_switch,
+                             expanded_cachesim_row &row) const;
     void
     update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
@@ -136,7 +139,9 @@ private:
     void
     create_table();
     void
-    insert_row_into_database(const cachesim_row &row, sqlite3_stmt *stmt);
+    insert_row_into_database(const cachesim_row &row, sqlite3_stmt *stmt) const;
+    void
+    insert_row_into_database(const expanded_cachesim_row &row, sqlite3_stmt *stmt) const;
     void
     begin_transaction();
     void
@@ -154,6 +159,9 @@ private:
     addr_t last_access_address = 0;
     sqlite3 *db = nullptr;
     std::vector<cachesim_row> row_buffer;
+    unsigned int max_buffer_size;
+    unsigned int max_trace_length;
+    bool use_expanded_trace_format;
 };
 
 } // namespace drmemtrace
