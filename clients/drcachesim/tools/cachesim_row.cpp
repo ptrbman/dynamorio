@@ -32,7 +32,7 @@ const char *cachesim_row::insert_row_string =
     "current_instruction_id, "
     "core, "
     "thread_switch, "
-    "core_switch, "
+    "core_switch"
     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 // Setters
 void
