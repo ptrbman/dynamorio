@@ -85,7 +85,7 @@ public:
     bool
     get_core_switch() const;
 
-    static constexpr std::string_view create_table_string =
+    static constexpr char* create_table_string =
         "CREATE TABLE IF NOT EXISTS cache_stats ("
         "instruction_number INTEGER PRIMARY KEY, "
         "access_address_delta INTEGER, "
@@ -100,6 +100,23 @@ public:
         "core INTEGER, "
         "thread_switch INTEGER, "
         "core_switch INTEGER);";
+
+    static constexpr char* insert_row_string =
+        "INSERT INTO cache_stats ("
+        "instruction_number, "
+        "access_address_delta, "
+        "pc_address_delta, "
+        "l1d_miss, "
+        "l1i_miss, "
+        "ll_miss, "
+        "instr_type, "
+        "byte_count, "
+        "disassembly_string, "
+        "current_instruction_id, "
+        "core, "
+        "thread_switch, "
+        "core_switch, "
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 };
 
 } // namespace drmemtrace

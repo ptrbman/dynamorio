@@ -62,7 +62,7 @@ public:
     float
     get_ll_ratio() const;
 
-    static constexpr std::string_view create_table_string =
+    static constexpr char* create_table_string =
         "CREATE TABLE IF NOT EXISTS cache_stats ("
         "instruction_number INTEGER PRIMARY KEY, "
         "access_address_delta INTEGER, "
@@ -86,6 +86,33 @@ public:
         "ll_hits INTEGER, "
         "ll_misses INTEGER, "
         "ll_ratio REAL);";
+
+    static constexpr char* insert_row_string =
+        "INSERT INTO cache_stats ("
+        "instruction_number, "
+        "access_address_delta, "
+        "pc_address_delta, "
+        "l1d_miss, "
+        "l1i_miss, "
+        "ll_miss, "
+        "instr_type, "
+        "byte_count, "
+        "disassembly_string, "
+        "current_instruction_id, "
+        "core, "
+        "thread_switch, "
+        "core_switch, "
+        "l1_data_hits, "
+        "l1_data_misses, "
+        "l1_data_ratio, "
+        "l1_inst_hits, "
+        "l1_inst_misses, "
+        "l1_inst_ratio, "
+        "ll_hits, "
+        "ll_misses, "
+        "ll_ratio"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+        "?, ?, ?, ?, ?, ?, ?);";
 };
 
 } // namespace drmemtrace

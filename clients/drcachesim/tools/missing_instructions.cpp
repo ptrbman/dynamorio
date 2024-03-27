@@ -59,7 +59,6 @@ namespace drmemtrace {
 
 const std::string missing_instructions_t::TOOL_NAME = "Missing_Instructions tool";
 
-// TODO: fix this entire method.
 void
 missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
 {
@@ -458,9 +457,9 @@ missing_instructions_t::open_database(const std::string &db_filename)
 void
 missing_instructions_t::create_table()
 {
-    const char *sql_create_table = (use_expanded_trace_format)
-        ? std::string(expanded_cachesim_row::create_table_string).c_str()
-        : std::string(cachesim_row::create_table_string).c_str();
+    const char *sql_create_table = use_expanded_trace_format
+        ? expanded_cachesim_row::create_table_string
+        : cachesim_row::create_table_string;
 
     char *errmsg;
     int rc = sqlite3_exec(db, sql_create_table, nullptr, nullptr, &errmsg);
@@ -562,31 +561,10 @@ missing_instructions_t::flush_buffer_to_database()
         begin_transaction(); // Start the transaction
 
         // Preparing the SQL statement once, instead of re-preparing it for every row
-        const char *sql_insert = "INSERT INTO cache_stats ("
-                                 "instruction_number, "
-                                 "access_address_delta, "
-                                 "pc_address_delta, "
-                                 "l1d_miss, "
-                                 "l1i_miss, "
-                                 "ll_miss, "
-                                 "instr_type, "
-                                 "byte_count, "
-                                 "disassembly_string, "
-                                 "current_instruction_id, "
-                                 "core, "
-                                 "thread_switch, "
-                                 "core_switch, "
-                                 "l1_data_hits, "
-                                 "l1_data_misses, "
-                                 "l1_data_ratio, "
-                                 "l1_inst_hits, "
-                                 "l1_inst_misses, "
-                                 "l1_inst_ratio, "
-                                 "ll_hits, "
-                                 "ll_misses, "
-                                 "ll_ratio"
-                                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-                                 "?, ?, ?, ?, ?, ?, ?);";
+        const char *sql_insert = use_expanded_trace_format
+            ? expanded_cachesim_row::insert_row_string
+            : cachesim_row::insert_row_string;
+
         sqlite3_stmt *stmt;
         int rc = sqlite3_prepare_v2(db, sql_insert, -1, &stmt, nullptr);
         if (rc != SQLITE_OK) {
