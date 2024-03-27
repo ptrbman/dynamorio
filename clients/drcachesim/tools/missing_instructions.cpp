@@ -215,8 +215,9 @@ missing_instructions_t::create_experiment_insert_statement(
 bool
 missing_instructions_t::process_memref(const memref_t &memref)
 {
-    if (current_instruction_id >= max_trace_length) {
+    if (static_cast<unsigned int>(current_instruction_id) >= max_trace_length) {
         close_database();
+        return false;
     }
     current_instruction_id++;
 
