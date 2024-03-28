@@ -3,7 +3,7 @@
 namespace dynamorio {
 namespace drmemtrace {
 
-// TODO: finish this and test it and let it rip
+// Justification for too many params: Class holds data.
 expanded_cachesim_row::expanded_cachesim_row(long l1_data_misses, long l1_data_hits,
                                              long l1_inst_hits, long l1_inst_misses,
                                              long ll_hits, long ll_misses,
@@ -14,11 +14,13 @@ expanded_cachesim_row::expanded_cachesim_row(long l1_data_misses, long l1_data_h
     : cachesim_row(current_instruction_id, core, thread_switch, core_switch)
     , l1_data_hits(static_cast<int>(l1_data_hits))
     , l1_data_misses(static_cast<int>(l1_data_misses))
+    , l1_data_ratio(l1_data_ratio)
     , l1_inst_hits(static_cast<int>(l1_inst_hits))
     , l1_inst_misses(static_cast<int>(l1_inst_misses))
+    , l1_inst_ratio(l1_inst_ratio)
     , ll_hits(static_cast<int>(ll_hits))
-    , ll_misses()
-
+    , ll_misses(static_cast<int>(ll_misses))
+    , ll_ratio(ll_ratio)
 {
 }
 

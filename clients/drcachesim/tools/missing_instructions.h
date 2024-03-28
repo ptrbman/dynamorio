@@ -125,12 +125,6 @@ private:
     void
     create_experiment_insert_statement(const cache_simulator_knobs_t &knobs);
     void
-    update_instruction_stats(int core, bool thread_switch, bool core_switch,
-                             cachesim_row &row) const;
-    void
-    update_instruction_stats(int core, bool thread_switch, bool core_switch,
-                             expanded_cachesim_row &row) const;
-    void
     update_miss_stats(int core, const memref_t &memref, cachesim_row &row);
     void
     embed_address_deltas_into_row(cachesim_row &row);
@@ -141,8 +135,11 @@ private:
     void
     begin_transaction();
     void
-    buffer_row(const std::unique_ptr<cachesim_row>& row);
-
+    buffer_row(std::unique_ptr<cachesim_row> &row);
+    std::unique_ptr<expanded_cachesim_row>
+    form_expanded_cachesim_row(int core, bool thread_switch, bool core_switch);
+    std::unique_ptr<cachesim_row>
+    form_cachesim_row(int core, bool thread_switch, bool core_switch);
     void
     flush_buffer_to_database();
     void

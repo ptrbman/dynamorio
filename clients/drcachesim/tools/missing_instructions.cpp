@@ -237,15 +237,17 @@ missing_instructions_t::process_memref(const memref_t &memref)
                 core_switch = true;
             last_core_index_ = core;
         }
+        // Prints to display the progress in a very rudimentary way
         if (current_instruction_id % 100000 == 0)
             std::cerr << "Doing " << current_instruction_id << std::endl;
+
+        // Knockoff factory methods
         std::unique_ptr<cachesim_row> row;
         if (use_expanded_trace_format)
-            row.reset(new expanded_cachesim_row()); // Replaces std::make_unique
+            row = form_expanded_cachesim_row(core, thread_switch, core_switch);
         else
-            row.reset(new cachesim_row(current_instruction_id, core, thread_switch,
-                                       core_switch)); // Replaces std::make_unique
-        update_instruction_stats(core, thread_switch, core_switch, *row);
+            row = form_cachesim_row(core, thread_switch, core_switch);
+
         update_miss_stats(core, memref, *row);
         embed_address_deltas_into_row(*row);
         if (!(row->get_instr_type() == "ifetch" && row->get_access_address_delta() == 0 &&
@@ -258,6 +260,43 @@ missing_instructions_t::process_memref(const memref_t &memref)
                   << std::endl;
         throw;
     }
+}
+
+std::unique_ptr<expanded_cachesim_row>
+missing_instructions_t::form_expanded_cachesim_row(int core, bool thread_switch,
+                                                   bool core_switch)
+{
+    long int l1_data_hits = cache_simulator_t::get_cache_metric(
+        metric_name_t::HITS, 0, core, cache_split_t::DATA);
+    long int l1_inst_hits = cache_simulator_t::get_cache_metric(
+        metric_name_t::HITS, 0, core, cache_split_t::INSTRUCTION);
+    long int l1_data_misses = cache_simulator_t::get_cache_metric(
+        metric_name_t::MISSES, 0, core, cache_split_t::DATA);
+    long int l1_inst_misses = cache_simulator_t::get_cache_metric(
+        metric_name_t::MISSES, 0, core, cache_split_t::INSTRUCTION);
+    long int ll_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 2, core,
+                                                           cache_split_t::DATA);
+    long int ll_misses = cache_simulator_t::get_cache_metric(metric_name_t::MISSES, 2,
+                                                             core, cache_split_t::DATA);
+
+    float l1_data_ratio = static_cast<float>(l1_data_misses) /
+        static_cast<float>(l1_data_misses + l1_data_hits);
+    float l1_inst_ratio = static_cast<float>(l1_inst_misses) /
+        static_cast<float>(l1_inst_misses + l1_inst_hits);
+    float ll_ratio =
+        static_cast<float>(ll_misses) / static_cast<float>(ll_misses + ll_hits);
+
+    return std::unique_ptr<expanded_cachesim_row>(new expanded_cachesim_row(
+        l1_data_misses, l1_data_hits, l1_inst_hits, l1_inst_misses, ll_hits, ll_misses,
+        l1_data_ratio, l1_inst_ratio, ll_ratio, current_instruction_id, core,
+        thread_switch, core_switch));
+}
+
+std::unique_ptr<cachesim_row>
+missing_instructions_t::form_cachesim_row(int core, bool thread_switch, bool core_switch)
+{
+    return std::unique_ptr<cachesim_row>(
+        new cachesim_row(current_instruction_id, core, thread_switch, core_switch));
 }
 
 void
@@ -379,56 +418,6 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
 
     get_opcode(memref, row);
 }
-void
-missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
-                                                 bool core_switch,
-                                                 cachesim_row &row) const
-{
-    row.set_current_instruction_id(current_instruction_id);
-    row.set_core(static_cast<uint8_t>(core));
-    row.set_thread_switch(thread_switch);
-    row.set_core_switch(core_switch);
-}
-void
-missing_instructions_t::update_instruction_stats(int core, bool thread_switch,
-                                                 bool core_switch,
-                                                 expanded_cachesim_row &row) const
-{
-    long int l1_data_hits = cache_simulator_t::get_cache_metric(
-        metric_name_t::HITS, 0, core, cache_split_t::DATA);
-    long int l1_inst_hits = cache_simulator_t::get_cache_metric(
-        metric_name_t::HITS, 0, core, cache_split_t::INSTRUCTION);
-    long int l1_data_misses = cache_simulator_t::get_cache_metric(
-        metric_name_t::MISSES, 0, core, cache_split_t::DATA);
-    long int l1_inst_misses = cache_simulator_t::get_cache_metric(
-        metric_name_t::MISSES, 0, core, cache_split_t::INSTRUCTION);
-    long int ll_hits = cache_simulator_t::get_cache_metric(metric_name_t::HITS, 2, core,
-                                                           cache_split_t::DATA);
-    long int ll_misses = cache_simulator_t::get_cache_metric(metric_name_t::MISSES, 2,
-                                                             core, cache_split_t::DATA);
-
-    float l1_data_ratio = static_cast<float>(l1_data_misses) /
-        static_cast<float>(l1_data_misses + l1_data_hits);
-    float l1_inst_ratio = static_cast<float>(l1_inst_misses) /
-        static_cast<float>(l1_inst_misses + l1_inst_hits);
-    float ll_ratio =
-        static_cast<float>(ll_misses) / static_cast<float>(ll_misses + ll_hits);
-
-    row.set_current_instruction_id(current_instruction_id);
-    row.set_core(static_cast<uint8_t>(core));
-    row.set_thread_switch(thread_switch);
-    row.set_core_switch(core_switch);
-    row.set_l1_data_misses(static_cast<int>(l1_data_misses));
-    row.set_l1_data_hits(static_cast<int>(l1_data_hits));
-    row.set_l1_inst_hits(static_cast<int>(l1_inst_hits));
-    row.set_l1_inst_misses(static_cast<int>(l1_inst_misses));
-    row.set_l1_data_ratio(l1_data_ratio);
-    row.set_l1_inst_ratio(l1_inst_ratio);
-    row.set_ll_hits(static_cast<int>(ll_hits));
-    row.set_ll_misses(static_cast<int>(ll_misses));
-    row.set_ll_ratio(ll_ratio);
-}
-
 bool
 missing_instructions_t::print_results()
 {
@@ -479,9 +468,9 @@ missing_instructions_t::create_table()
 }
 
 void
-missing_instructions_t::buffer_row(const std::unique_ptr<cachesim_row> &row)
+missing_instructions_t::buffer_row(std::unique_ptr<cachesim_row> &row)
 {
-    row_buffer.push_back(row);
+    row_buffer.push_back(std::move(row));
 
     if (row_buffer.size() % 100000 == 0) {
         std::cout << "buffer at " << row_buffer.size() << std::endl;
