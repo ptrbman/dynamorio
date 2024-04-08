@@ -18,7 +18,7 @@ protected:
     bool l1d_miss;
     bool l1i_miss;
     bool ll_miss;
-    std::string instr_type = "";
+    uint8_t instr_type;
     uint8_t byte_count;
     std::string disassembly_string;
     int current_instruction_id;
@@ -45,7 +45,7 @@ public:
     void
     set_ll_miss(bool value);
     void
-    set_instr_type(const std::string &value);
+    set_instr_type(uint8_t value);
     void
     set_byte_count(uint8_t value);
     void
@@ -74,7 +74,7 @@ public:
     get_l1i_miss() const;
     bool
     get_ll_miss() const;
-    std::string
+    uint8_t
     get_instr_type() const;
     uint8_t
     get_byte_count() const;
