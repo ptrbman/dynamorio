@@ -339,7 +339,6 @@ missing_instructions_t::embed_address_deltas_into_row(cachesim_row &row)
 
         row.set_access_address_delta(static_cast<int>(delta_access));
         row.set_pc_address_delta(static_cast<int>(delta_pc));
-
     } catch (const std::exception &e) {
         std::cerr << "Exception: " << e.what() << std::endl;
         throw;
@@ -415,7 +414,7 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
     row.set_l1d_miss(data_miss_l1);
     row.set_l1i_miss(inst_miss_l1);
     row.set_ll_miss(unified_miss_ll);
-
+    row.set_core(core);
     get_opcode(memref, row);
 }
 bool
