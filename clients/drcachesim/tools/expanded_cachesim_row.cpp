@@ -36,7 +36,7 @@ expanded_cachesim_row::insert_into_database(sqlite3_stmt *stmt) const
         sqlite3_bind_int(stmt, 4, get_l1d_miss() ? 1 : 0);
         sqlite3_bind_int(stmt, 5, get_l1i_miss() ? 1 : 0);
         sqlite3_bind_int(stmt, 6, get_ll_miss() ? 1 : 0);
-        sqlite3_bind_text(stmt, 7, get_instr_type().c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 7, get_instr_type());
         sqlite3_bind_int(stmt, 8, get_byte_count());
         sqlite3_bind_text(stmt, 9, get_disassembly_string().c_str(), -1,
                           SQLITE_TRANSIENT);
@@ -68,7 +68,7 @@ const char *expanded_cachesim_row::create_table_string =
     "l1d_miss INTEGER, "
     "l1i_miss INTEGER, "
     "ll_miss INTEGER, "
-    "instr_type TEXT, "
+    "instr_type INTEGER, "
     "byte_count INTEGER, "
     "disassembly_string TEXT, "
     "current_instruction_id INTEGER, "

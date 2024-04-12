@@ -67,39 +67,39 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
     if (!type_is_instr(memref.instr.type) &&
         memref.data.type != TRACE_TYPE_INSTR_NO_FETCH) {
 
-        std::string name;
+        uint8_t name;
         switch (memref.data.type) {
-        default: name = "entry_type_" + memref.data.type; break;
-        case TRACE_TYPE_THREAD_EXIT: name = "thread_exit"; break;
+        default: name = 0; break;
+        case TRACE_TYPE_THREAD_EXIT: name = 1; break;
 
-        case TRACE_TYPE_READ: name = "read"; break;
-        case TRACE_TYPE_WRITE: name = "write"; break;
-        case TRACE_TYPE_INSTR_FLUSH: name = "iflush"; break;
-        case TRACE_TYPE_DATA_FLUSH: name = "dflush"; break;
-        case TRACE_TYPE_PREFETCH: name = "pref"; break;
-        case TRACE_TYPE_PREFETCH_READ_L1: name = "pref-r-L1"; break;
-        case TRACE_TYPE_PREFETCH_READ_L2: name = "pref-r-L2"; break;
-        case TRACE_TYPE_PREFETCH_READ_L3: name = "pref-r-L3"; break;
-        case TRACE_TYPE_PREFETCHNTA: name = "pref-NTA"; break;
-        case TRACE_TYPE_PREFETCH_READ: name = "pref-r"; break;
-        case TRACE_TYPE_PREFETCH_WRITE: name = "pref-w"; break;
-        case TRACE_TYPE_PREFETCH_INSTR: name = "pref-i"; break;
-        case TRACE_TYPE_PREFETCH_READ_L1_NT: name = "pref-r-L1-NT"; break;
-        case TRACE_TYPE_PREFETCH_READ_L2_NT: name = "pref-r-L2-NT"; break;
-        case TRACE_TYPE_PREFETCH_READ_L3_NT: name = "pref-r-L3-NT"; break;
-        case TRACE_TYPE_PREFETCH_INSTR_L1: name = "pref-i-L1"; break;
-        case TRACE_TYPE_PREFETCH_INSTR_L1_NT: name = "pref-i-L1-NT"; break;
-        case TRACE_TYPE_PREFETCH_INSTR_L2: name = "pref-i-L2"; break;
-        case TRACE_TYPE_PREFETCH_INSTR_L2_NT: name = "pref-i-L2-NT"; break;
-        case TRACE_TYPE_PREFETCH_INSTR_L3: name = "pref-i-L3"; break;
-        case TRACE_TYPE_PREFETCH_INSTR_L3_NT: name = "pref-i-L3-NT"; break;
-        case TRACE_TYPE_PREFETCH_WRITE_L1: name = "pref-w-L1"; break;
-        case TRACE_TYPE_PREFETCH_WRITE_L1_NT: name = "pref-w-L1-NT"; break;
-        case TRACE_TYPE_PREFETCH_WRITE_L2: name = "pref-w-L2"; break;
-        case TRACE_TYPE_PREFETCH_WRITE_L2_NT: name = "pref-w-L2-NT"; break;
-        case TRACE_TYPE_PREFETCH_WRITE_L3: name = "pref-w-L3"; break;
-        case TRACE_TYPE_PREFETCH_WRITE_L3_NT: name = "pref-w-L3-NT"; break;
-        case TRACE_TYPE_HARDWARE_PREFETCH: name = "pref-HW"; break;
+        case TRACE_TYPE_READ: name = 2; break;
+        case TRACE_TYPE_WRITE: name = 3; break;
+        case TRACE_TYPE_INSTR_FLUSH: name = 4; break;
+        case TRACE_TYPE_DATA_FLUSH: name = 5; break;
+        case TRACE_TYPE_PREFETCH: name = 6; break;
+        case TRACE_TYPE_PREFETCH_READ_L1: name = 7; break;
+        case TRACE_TYPE_PREFETCH_READ_L2: name = 8; break;
+        case TRACE_TYPE_PREFETCH_READ_L3: name = 9; break;
+        case TRACE_TYPE_PREFETCHNTA: name = 10; break;
+        case TRACE_TYPE_PREFETCH_READ: name = 11; break;
+        case TRACE_TYPE_PREFETCH_WRITE: name = 12; break;
+        case TRACE_TYPE_PREFETCH_INSTR: name = 13; break;
+        case TRACE_TYPE_PREFETCH_READ_L1_NT: name = 14; break;
+        case TRACE_TYPE_PREFETCH_READ_L2_NT: name = 15; break;
+        case TRACE_TYPE_PREFETCH_READ_L3_NT: name = 16; break;
+        case TRACE_TYPE_PREFETCH_INSTR_L1: name = 17; break;
+        case TRACE_TYPE_PREFETCH_INSTR_L1_NT: name = 18; break;
+        case TRACE_TYPE_PREFETCH_INSTR_L2: name = 19; break;
+        case TRACE_TYPE_PREFETCH_INSTR_L2_NT: name = 20; break;
+        case TRACE_TYPE_PREFETCH_INSTR_L3: name = 21; break;
+        case TRACE_TYPE_PREFETCH_INSTR_L3_NT: name = 22; break;
+        case TRACE_TYPE_PREFETCH_WRITE_L1: name = 23; break;
+        case TRACE_TYPE_PREFETCH_WRITE_L1_NT: name = 24; break;
+        case TRACE_TYPE_PREFETCH_WRITE_L2: name = 25; break;
+        case TRACE_TYPE_PREFETCH_WRITE_L2_NT: name = 26; break;
+        case TRACE_TYPE_PREFETCH_WRITE_L3: name = 27; break;
+        case TRACE_TYPE_PREFETCH_WRITE_L3_NT: name = 28; break;
+        case TRACE_TYPE_HARDWARE_PREFETCH: name = 29; break;
         }
 
         row.set_byte_count(static_cast<uint8_t>(memref.data.size));
@@ -141,7 +141,7 @@ missing_instructions_t::get_opcode(const memref_t &memref, cachesim_row &row)
     }
     disasm.erase(std::remove(disasm.begin(), disasm.end(), '\n'), disasm.end());
 
-    row.set_instr_type("ifetch");
+    row.set_instr_type(30);
     row.set_disassembly_string(disasm);
     row.set_byte_count(static_cast<uint8_t>(memref.data.size));
 }
@@ -250,7 +250,7 @@ missing_instructions_t::process_memref(const memref_t &memref)
 
         update_miss_stats(core, memref, *row);
         embed_address_deltas_into_row(*row);
-        if (!(row->get_instr_type() == "ifetch" && row->get_access_address_delta() == 0 &&
+        if (!(row->get_instr_type() == 30 && row->get_access_address_delta() == 0 &&
               row->get_pc_address_delta() == 0)) {
             buffer_row(row);
         }
