@@ -14,7 +14,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
-        submodules: 'recursive'  # Ensure submodules are checked out
+        submodules: 'recursive'  # Ensures that all submodules are checked out
 
     - name: Install dependencies
       run: |
@@ -29,22 +29,23 @@ jobs:
       run: |
         mkdir -p build
         cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$(pwd)/../install ..
+        cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install ..
         make -j$(nproc)
         make install
 
     - name: Verify Installation
       run: |
-        echo "Checking the install directory:"
-        ls -lah $(pwd)/../install
+        echo "Current working directory: $(pwd)"
+        echo "Contents of the installation directory:"
+        ls -lah ${{ github.workspace }}/install
 
     - name: Package
       run: |
-        cd ../install
+        cd ${{ github.workspace }}/install
         tar -czvf dynamorio-${{ github.sha }}.tar.gz *
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v2
       with:
         name: dynamorio-${{ github.run_id }}
-        path: ../install/dynamorio-${{ github.sha }}.tar.gz
+        path: ${{ github.workspace }}/install/dynamorio-${{ github.sha }}.tar.gz
