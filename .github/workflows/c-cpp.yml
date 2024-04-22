@@ -27,14 +27,16 @@ jobs:
 
     - name: Configure and Build
       run: |
-        mkdir build && cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../install ..
+        mkdir -p build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$(pwd)/../install ..
         make -j$(nproc)
         make install
 
-    - name: List install directory contents
+    - name: Verify Installation
       run: |
-        ls -lah ../install
+        echo "Checking the install directory:"
+        ls -lah $(pwd)/../install
 
     - name: Package
       run: |
