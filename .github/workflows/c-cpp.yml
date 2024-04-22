@@ -1,51 +1,52 @@
-name: C/C++ CI Ubuntu 22.04
+name: C/C++ CI with Release
 
 on:
   push:
-    branches: [ "master" ]
+    branches:
+      - master
   pull_request:
-    branches: [ "master" ]
+    branches:
+      - master
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+    - uses: actions/checkout@v3
       with:
-        submodules: 'recursive'  # Ensures that all submodules are checked out
+        submodules: 'recursive'
 
-    - name: Install dependencies
+    - name: Setup dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake build-essential git pkg-config libgtk-3-dev \
-        libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev \
-        libjpeg-dev libpng-dev libtiff-dev gfortran openexr libatlas-base-dev python3-dev \
-        python3-numpy libtbb2 libtbb-dev libsqlite3-dev g++ g++-multilib doxygen zlib1g-dev \
-        libunwind-dev libsnappy-dev liblz4-dev elfutils libdw-dev libiberty-dev
+        sudo apt-get install -y cmake build-essential
 
-    - name: Configure and Build
+    - name: Build project
       run: |
-        mkdir -p build
-        cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install ..
-        make -j$(nproc)
-        make install
+        mkdir build && cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make
+        tar -czvf myproject-${{ github.sha }}.tar.gz output_folder/
 
-    - name: Verify Installation
-      run: |
-        echo "Current working directory: $(pwd)"
-        echo "Contents of the installation directory:"
-        ls -lah ${{ github.workspace }}/install
-
-    - name: Package
-      run: |
-        cd ${{ github.workspace }}/install
-        tar -czvf dynamorio-${{ github.sha }}.tar.gz *
-
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v2
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        name: dynamorio-${{ github.run_id }}
-        path: ${{ github.workspace }}/install/dynamorio-${{ github.sha }}.tar.gz
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./build/myproject-${{ github.sha }}.tar.gz
+        asset_name: myproject-${{ github.sha }}.tar.gz
+        asset_content_type: application/gzip
+
