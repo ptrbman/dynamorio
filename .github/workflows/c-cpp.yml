@@ -51,7 +51,7 @@ jobs:
         # Assuming the output directory is 'build' (modify as needed)
         if [ -d "build" ]; then
           echo "Building tar from 'build' directory"
-          tar -czvf myproject-4554ac73d877fe55de803e47ee547de5205ec322.tar.gz build/
+          tar -czvf myproject-${{ github.ref }}.tar.gz build/
         else
           echo "Build directory does not exist."
           exit 1
