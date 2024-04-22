@@ -33,23 +33,25 @@ jobs:
 
     - name: Archive the build outputs
       run: |
-        # Display current directory
+        # Display current directory information
         echo "Current directory:"
         pwd
-        # List contents of the current directory
         echo "Contents of the current directory:"
         ls -la
-        # Change to the project root if not already there
-        cd ${{ github.workspace }}/dynamorio-missing-instructions
+        
+        # Change to the project root directory (if necessary)
+        # The following line might not be needed if the current directory is already the project root
+        cd /home/runner/work/dynamorio-missing-instructions/dynamorio-missing-instructions
+        
         # Confirm the change and list contents
         echo "Changed to project root directory:"
         pwd
         ls -la
-        # If the output folder is directly in the project root, adjust the path accordingly
+        
         # Assuming the output directory is 'build' (modify as needed)
         if [ -d "build" ]; then
           echo "Building tar from 'build' directory"
-          tar -czvf myproject-${{ github.sha }}.tar.gz build/
+          tar -czvf myproject-4554ac73d877fe55de803e47ee547de5205ec322.tar.gz build/
         else
           echo "Build directory does not exist."
           exit 1
