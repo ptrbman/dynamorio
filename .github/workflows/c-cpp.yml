@@ -33,11 +33,27 @@ jobs:
 
     - name: Archive the build outputs
       run: |
-        # Ensure you are in the right directory
+        # Display current directory
+        echo "Current directory:"
         pwd
-        ls -la ..
-        # Replace 'output_folder' with the correct path to where your build outputs are stored
-        tar -czvf myproject-${{ github.sha }}.tar.gz ../output_folder/
+        # List contents of the current directory
+        echo "Contents of the current directory:"
+        ls -la
+        # Change to the project root if not already there
+        cd ${{ github.workspace }}/dynamorio-missing-instructions
+        # Confirm the change and list contents
+        echo "Changed to project root directory:"
+        pwd
+        ls -la
+        # If the output folder is directly in the project root, adjust the path accordingly
+        # Assuming the output directory is 'build' (modify as needed)
+        if [ -d "build" ]; then
+          echo "Building tar from 'build' directory"
+          tar -czvf myproject-${{ github.sha }}.tar.gz build/
+        else
+          echo "Build directory does not exist."
+          exit 1
+        fi
 
     - name: Create Release
       id: create_release
