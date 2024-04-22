@@ -27,7 +27,17 @@ jobs:
         mkdir build && cd build
         cmake .. -DCMAKE_BUILD_TYPE=Release
         make
-        tar -czvf myproject-${{ github.sha }}.tar.gz output_folder/
+        # Assuming 'make' or a custom command creates an 'output_folder' at the root of the project
+        # Here we add a step to list what's in the build directory
+        ls -la
+
+    - name: Archive the build outputs
+      run: |
+        # Ensure you are in the right directory
+        pwd
+        ls -la ..
+        # Replace 'output_folder' with the correct path to where your build outputs are stored
+        tar -czvf myproject-${{ github.sha }}.tar.gz ../output_folder/
 
     - name: Create Release
       id: create_release
@@ -49,4 +59,3 @@ jobs:
         asset_path: ./build/myproject-${{ github.sha }}.tar.gz
         asset_name: myproject-${{ github.sha }}.tar.gz
         asset_content_type: application/gzip
-
