@@ -110,6 +110,19 @@ droption_t<std::string>
                   "cache misses being written, to save data.",
                   "");
 
+droption_t<bool> op_print_to_database(
+    DROPTION_SCOPE_ALL, "print_to_database", true,
+    "Selects whether printing to database is desired with the missing_instructions "
+    "simulator. Not active unless this simulator type is selected.",
+    "");
+
+droption_t<int> op_printing_buffer_size(
+    DROPTION_SCOPE_ALL, "printing_buffer_size", 100 * 150,
+    "Chooses the frequency of rows to print to the screen. Used for comparing the "
+    "performance to the ML model. Ideally should be batch size x seq. length. Active "
+    "only when not printing to database.",
+    "");
+
 droption_t<std::string> op_infile(
     DROPTION_SCOPE_ALL, "infile", "", "Offline legacy file for input to the simulator",
     "Directs the simulator to use a single all-threads-interleaved-into-one trace "

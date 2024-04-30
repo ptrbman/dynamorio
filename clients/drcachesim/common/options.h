@@ -150,6 +150,8 @@ extern dynamorio::droption::droption_t<std::string> op_cache_trace_log_path;
 extern dynamorio::droption::droption_t<unsigned int> op_max_trace_length;
 extern dynamorio::droption::droption_t<unsigned int> op_cachesim_row_buffer_size;
 extern dynamorio::droption::droption_t<std::string> op_trace_form;
+extern dynamorio::droption::droption_t<bool> op_print_to_database;
+extern dynamorio::droption::droption_t<int> op_printing_buffer_size;
 extern dynamorio::droption::droption_t<bool> op_show_func_trace;
 extern dynamorio::droption::droption_t<int> op_jobs;
 extern dynamorio::droption::droption_t<bool> op_test_mode;

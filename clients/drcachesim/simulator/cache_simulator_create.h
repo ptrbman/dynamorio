@@ -76,6 +76,8 @@ struct cache_simulator_knobs_t {
         , max_trace_length(100000000)
         , cachesim_row_buffer_size(1000000)
         , trace_form("expanded")
+        , print_to_database(true)
+        , printing_buffer_size(0)
     {
     }
     unsigned int num_cores;
@@ -101,6 +103,8 @@ struct cache_simulator_knobs_t {
     unsigned int max_trace_length;
     unsigned int cachesim_row_buffer_size;
     std::string trace_form;
+    bool print_to_database;
+    int printing_buffer_size;
 };
 
 /** Creates an instance of a cache simulator with a 2-level hierarchy. */

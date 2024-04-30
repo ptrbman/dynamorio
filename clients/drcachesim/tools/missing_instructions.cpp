@@ -479,8 +479,8 @@ missing_instructions_t::buffer_row(std::unique_ptr<cachesim_row> &row)
     }
     if (print_to_database && (row_buffer.size() >= max_buffer_size)) { // Check if we've reached the buffer limit
         flush_buffer_to_database();
-    } else if (!print_to_database && (row_buffer.size() >= printing_buffer_size)){
-        
+    } else if (!print_to_database && (row_buffer.size() % printing_buffer_size == 0)){
+        std::cout << row << std::endl;
     }
 }
 
