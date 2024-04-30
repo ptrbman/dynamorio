@@ -27,8 +27,28 @@ protected:
     bool core_switch;
 
 public:
+    friend std::ostream &
+    operator<<(std::ostream &os, const cachesim_row &row)
+    {
+        os << "Cachesim Row ["
+           << "Access Address: " << row.get_access_address()
+           << ", PC Address: " << row.get_pc_address()
+           << ", Access Address Delta: " << row.get_access_address_delta()
+           << ", PC Address Delta: " << row.get_pc_address_delta()
+           << ", L1D Miss: " << (row.get_l1d_miss() ? "Yes" : "No")
+           << ", L1I Miss: " << (row.get_l1i_miss() ? "Yes" : "No")
+           << ", LL Miss: " << (row.get_ll_miss() ? "Yes" : "No")
+           << ", Instruction Type: " << static_cast<unsigned int>(row.get_instr_type())
+           << ", Byte Count: " << static_cast<unsigned int>(row.get_byte_count())
+           << ", Disassembly: " << row.get_disassembly_string()
+           << ", Instruction ID: " << row.get_current_instruction_id()
+           << ", Core: " << static_cast<unsigned int>(row.get_core())
+           << ", Thread Switch: " << (row.get_thread_switch() ? "Yes" : "No")
+           << ", Core Switch: " << (row.get_core_switch() ? "Yes" : "No") << "]";
+        return os;
+    }
     cachesim_row(int current_instruction_id, int core, bool thread_switch,
-                         bool core_switch);
+                 bool core_switch);
     // Setters declarations
     void
     set_access_address(const addr_t value);

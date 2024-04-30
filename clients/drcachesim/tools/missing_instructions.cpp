@@ -158,11 +158,13 @@ missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &kn
     , csv_log_path(knobs_.cache_trace_log_path)
     , max_buffer_size(knobs_.cachesim_row_buffer_size)
     , max_trace_length(knobs_.max_trace_length)
+    , print_to_database(knobs_.print_to_database)
+    , printing_buffer_size(knobs_.printing_buffer_size)
 {
     std::string format = knobs_.trace_form;
     std::transform(format.begin(), format.end(), format.begin(), ::tolower);
     use_expanded_trace_format = (format == "expanded");
-
+    
     std::cout << "Path for logging: " << csv_log_path << "\n";
     create_experiment_insert_statement(knobs_);
 }
@@ -252,6 +254,7 @@ missing_instructions_t::process_memref(const memref_t &memref)
         embed_address_deltas_into_row(*row);
         if (!(row->get_instr_type() == 30 && row->get_access_address_delta() == 0 &&
               row->get_pc_address_delta() == 0)) {
+                if 
             buffer_row(row);
         }
         return true;
@@ -474,8 +477,10 @@ missing_instructions_t::buffer_row(std::unique_ptr<cachesim_row> &row)
     if (row_buffer.size() % 100000 == 0) {
         std::cout << "buffer at " << row_buffer.size() << std::endl;
     }
-    if (row_buffer.size() >= max_buffer_size) { // Check if we've reached the buffer limit
+    if (print_to_database && (row_buffer.size() >= max_buffer_size)) { // Check if we've reached the buffer limit
         flush_buffer_to_database();
+    } else if (!print_to_database && (row_buffer.size() >= printing_buffer_size)){
+        
     }
 }
 
@@ -542,7 +547,7 @@ void
 missing_instructions_t::close_database()
 {
     // After all rows have been buffered and you're done processing
-    if (!row_buffer.empty()) {
+    if (!row_buffer.empty() && print_to_database) {
         flush_buffer_to_database();
     }
     end_transaction(); // Clean up the prepared statement

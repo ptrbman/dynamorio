@@ -156,6 +156,9 @@ private:
     unsigned int max_buffer_size;
     unsigned int max_trace_length;
     bool use_expanded_trace_format;
+    bool print_to_database = true;
+    int printing_counter = 0;
+    int printing_buffer_size = 0;
 };
 
 } // namespace drmemtrace
