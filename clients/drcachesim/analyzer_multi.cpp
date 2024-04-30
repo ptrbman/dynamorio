@@ -574,6 +574,8 @@ analyzer_multi_t::get_cache_simulator_knobs()
     knobs->max_trace_length = op_max_trace_length.get_value();
     knobs->cachesim_row_buffer_size = op_cachesim_row_buffer_size.get_value();
     knobs->trace_form = op_trace_form.get_value();
+    knobs->print_to_database = op_print_to_database.get_value();
+    knobs->printing_buffer_size = op_printing_buffer_size.get_value();
     return knobs;
 }
 

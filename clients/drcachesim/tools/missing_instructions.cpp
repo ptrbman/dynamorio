@@ -158,15 +158,17 @@ missing_instructions_t::missing_instructions_t(const cache_simulator_knobs_t &kn
     , csv_log_path(knobs_.cache_trace_log_path)
     , max_buffer_size(knobs_.cachesim_row_buffer_size)
     , max_trace_length(knobs_.max_trace_length)
-    , print_to_database(knobs_.print_to_database)
-    , printing_buffer_size(knobs_.printing_buffer_size)
+    , print_to_database(false)
+    , printing_buffer_size(10000)
 {
     std::string format = knobs_.trace_form;
     std::transform(format.begin(), format.end(), format.begin(), ::tolower);
     use_expanded_trace_format = (format == "expanded");
-    
-    std::cout << "Path for logging: " << csv_log_path << "\n";
-    create_experiment_insert_statement(knobs_);
+    std::cout << "PRINT TO DATABASE: " << print_to_database <<std::endl;
+    if (print_to_database) {
+        std::cout << "Path for logging: " << csv_log_path << "\n";
+        create_experiment_insert_statement(knobs_);
+    }
 }
 
 void
@@ -217,10 +219,15 @@ missing_instructions_t::create_experiment_insert_statement(
 bool
 missing_instructions_t::process_memref(const memref_t &memref)
 {
+    // std::cout << "DEBUG 0" << std::endl;
+
     if (static_cast<unsigned int>(current_instruction_id) >= max_trace_length) {
-        close_database();
+        if (print_to_database){
+            close_database();
+
+        }
         return false;
-    }
+    } 
     current_instruction_id++;
 
     try {
@@ -232,16 +239,17 @@ missing_instructions_t::process_memref(const memref_t &memref)
         else {
             core = core_for_thread(memref.data.tid);
             last_thread_ = memref.data.tid;
-            std::cout << "< CORE_SWITCH_FROM_" << last_core_index_ << "_TO_" << core
-                      << " >" << std::endl;
+            // std::cout << "< CORE_SWITCH_FROM_" << last_core_index_ << "_TO_" << core
+            //           << " >" << std::endl;
             thread_switch = true;
             if (core != last_thread_)
                 core_switch = true;
             last_core_index_ = core;
         }
+        // std::cout << "DEBUG 1" << std::endl;
         // Prints to display the progress in a very rudimentary way
-        if (current_instruction_id % 100000 == 0)
-            std::cerr << "Doing " << current_instruction_id << std::endl;
+        // if (current_instruction_id % 100000 == 0)
+        //     std::cerr << "Doing " << current_instruction_id << std::endl;
 
         // Knockoff factory methods
         std::unique_ptr<cachesim_row> row;
@@ -249,12 +257,15 @@ missing_instructions_t::process_memref(const memref_t &memref)
             row = form_expanded_cachesim_row(core, thread_switch, core_switch);
         else
             row = form_cachesim_row(core, thread_switch, core_switch);
+        // std::cout << "DEBUG 2" << std::endl;
 
         update_miss_stats(core, memref, *row);
+        // std::cout << "DEBUG 3" << std::endl;
+
         embed_address_deltas_into_row(*row);
         if (!(row->get_instr_type() == 30 && row->get_access_address_delta() == 0 &&
               row->get_pc_address_delta() == 0)) {
-                if 
+            // std::cout << "Adding to buffer" << std::endl;
             buffer_row(row);
         }
         return true;
@@ -358,8 +369,11 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
         metric_name_t::MISSES, 0, core, cache_split_t::INSTRUCTION);
     long int unified_misses_ll_pre = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 2, core, cache_split_t::DATA);
+    // std::cout << "DEBUG 4" << std::endl;
 
     cache_simulator_t::process_memref(memref);
+    // std::cout << "DEBUG 5" << std::endl;
+
     long int data_misses_l1_post = cache_simulator_t::get_cache_metric(
         metric_name_t::MISSES, 0, core, cache_split_t::DATA);
     long int inst_misses_l1_post = cache_simulator_t::get_cache_metric(
@@ -411,6 +425,7 @@ missing_instructions_t::update_miss_stats(int core, const memref_t &memref,
         pc = memref.data.pc;
         addr = memref.data.addr;
     }
+    // std::cout << "DEBUG 5" << std::endl;
 
     row.set_pc_address(pc);
     row.set_access_address(addr);
@@ -474,13 +489,17 @@ missing_instructions_t::buffer_row(std::unique_ptr<cachesim_row> &row)
 {
     row_buffer.push_back(std::move(row));
 
-    if (row_buffer.size() % 100000 == 0) {
-        std::cout << "buffer at " << row_buffer.size() << std::endl;
-    }
-    if (print_to_database && (row_buffer.size() >= max_buffer_size)) { // Check if we've reached the buffer limit
+    // if (row_buffer.size() % 100000 == 0) {
+    //     std::cout << "buffer at " << row_buffer.size() << std::endl;
+    // }
+    if (print_to_database &&
+        (row_buffer.size() >=
+         max_buffer_size)) { // Check if we've reached the buffer limit
         flush_buffer_to_database();
-    } else if (!print_to_database && (row_buffer.size() % printing_buffer_size == 0)){
-        std::cout << row << std::endl;
+    } else if (!print_to_database && (row_buffer.size() % 10000000 == 0)) {
+        auto expanded_row = dynamic_cast<expanded_cachesim_row*>(row_buffer.back().get());
+
+        std::cout << current_instruction_id <<" "<< expanded_row->get_l1_data_misses() << std::endl;
     }
 }
 
